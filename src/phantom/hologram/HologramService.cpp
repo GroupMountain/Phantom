@@ -2,6 +2,7 @@
 
 #include "mod/Phantom.h"
 #include "phantom/i18n/I18n.h"
+#include "phantom/net/DebugDrawerPacket.h"
 #include "phantom/net/SculkPacket.h"
 
 #include "ll/api/Config.h"
@@ -12,9 +13,6 @@
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/world/level/Level.h"
-
-#include <sculk/protocol/codec/level/PrimitiveShapes.hpp>
-#include <sculk/protocol/codec/packet/PrimitiveShapesPacket.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -74,8 +72,6 @@ std::string logText(std::string_view key, std::initializer_list<std::pair<std::s
 [[nodiscard]] sculk::protocol::Vec3 toProtocol(Vec3 const& pos) {
     return {pos.x, pos.y, pos.z};
 }
-
-[[nodiscard]] std::int32_t argb(std::uint32_t value) { return static_cast<std::int32_t>(value); }
 
 [[nodiscard]] uint64_t nowMs() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -503,34 +499,24 @@ bool HologramService::save() {
 }
 
 void HologramService::sendHologram(Player& player, Hologram const& hologram, std::string const& text) {
-    sculk::protocol::PrimitiveShapes shape;
-    shape.mNetworkId         = runtimeIdFor(hologram.name, 0);
-    shape.mType              = sculk::protocol::PrimitiveShapesType::Text;
-    shape.mLocation          = toProtocol(hologram.position);
-    shape.mDimensionId       = hologram.dimension;
-    shape.mMaxRenderDistance = static_cast<float>(configuredViewDistance(hologram));
-    shape.mColor             = argb(0xFFFFFFFFu);
-    shape.mShape             = sculk::protocol::PrimitiveText{
-        .mText             = text,
-        .mUseRotation      = false,
-        .mBackgroundColor  = argb(0x00000000u),
-        .mDepthTest        = false,
-        .mShowBackface     = true,
-        .mShowTextBackface = true,
-    };
-
-    sculk::protocol::PrimitiveShapesPacket packet;
-    packet.mShapes.emplace_back(std::move(shape));
+    net::DebugDrawerPacket packet;
+    packet.shapes.push_back({
+        .networkId   = runtimeIdFor(hologram.name, 0),
+        .location    = toProtocol(hologram.position),
+        .dimensionId = hologram.dimension,
+        .text        = text,
+        .remove      = false,
+    });
     net::sendSculkPacketTo(player, packet, logger());
 }
 
 void HologramService::removeHologramFromClient(Player& player, Hologram const& hologram) {
-    sculk::protocol::PrimitiveShapes shape;
-    shape.mNetworkId   = runtimeIdFor(hologram.name, 0);
-    shape.mDimensionId = hologram.dimension;
-
-    sculk::protocol::PrimitiveShapesPacket packet;
-    packet.mShapes.emplace_back(std::move(shape));
+    net::DebugDrawerPacket packet;
+    packet.shapes.push_back({
+        .networkId   = runtimeIdFor(hologram.name, 0),
+        .dimensionId = hologram.dimension,
+        .remove      = true,
+    });
     net::sendSculkPacketTo(player, packet, logger());
 }
 

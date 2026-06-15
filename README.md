@@ -1,6 +1,6 @@
 # Phantom
 
-Phantom 是一个 LeviLamina 基岩版悬浮字插件，当前版本 `0.0.1`。它参考 DecentHolograms 的管理模型，但按基岩版客户端能力重新实现：悬浮字通过 `PrimitiveShapesPacket` 的 TEXT shape 渲染，不在服务端世界里生成真实实体。
+Phantom 是一个 LeviLamina 基岩版悬浮字插件，当前版本 `0.0.1`。它参考 DecentHolograms 的管理模型，但按基岩版客户端能力重新实现：悬浮字通过协议 ID 328 的 Debug Drawer TEXT shape 渲染，不在服务端世界里生成真实实体。
 
 ## 功能
 
@@ -121,4 +121,4 @@ xmake build Phantom
 - GMLIB FloatingText：运行时悬浮字管理模型参考。
 - GMSidebar：动态内容池、轮播间隔和每玩家缓存刷新策略参考。
 - ItemPhys：本仓库内的数据包发包范式参考。
-- SculkCatalystMC/Protocol：`PrimitiveShapesPacket` 结构和序列化实现参考。
+- SculkCatalystMC/Protocol：协议 ID、基础类型和序列化范式参考；ID 328 在当前 BDS/LeviLamina 中按 `DebugDrawerPacket` 线格式写入。

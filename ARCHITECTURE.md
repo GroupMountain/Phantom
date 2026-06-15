@@ -7,7 +7,7 @@
 Phantom 不是 Java 版 DecentHolograms 的逐行翻译，而是面向 LeviLamina 和 Minecraft Bedrock Dedicated Server 的原生实现。
 
 - 管理模型接近 DecentHolograms：命名悬浮字、多行文本、持久化、启停、移动、编辑。
-- 渲染模型面向基岩版：使用 `PrimitiveShapesPacket` 的 `TEXT` shape，不创建真实实体，也不再模拟 armor stand。
+- 渲染模型面向基岩版：使用协议 ID 328 的 Debug Drawer TEXT shape，不创建真实实体，也不再模拟 armor stand。
 - 支持自定义维度：维度保存为整数 ID，不假设只有 0、1、2 三个维度。
 - 支持动态内容：每行可配置内容池、轮播间隔和玩家变量解析。
 - 发包实现对齐 ItemPhys 范式：Sculk Protocol 构包，BDS 原生包读回校验，再发送给指定玩家。
@@ -52,21 +52,19 @@ src/phantom/i18n/I18n.*
 
 ## 显示机制
 
-每个悬浮字对每个可见玩家只对应一个客户端侧 `PrimitiveShapes` TEXT shape：
+每个悬浮字对每个可见玩家只对应一个客户端侧 Debug Drawer TEXT shape：
 
 1. `HologramService` 逐行解析文本，包括动态内容池和玩家变量。
 2. 将所有行用 `\n` 合并为一个字符串。
-3. 使用 `PrimitiveShapesPacket` 发送一个 `PrimitiveShapesType::Text`：
+3. 使用协议 ID 328 发送一个 TEXT shape。当前 LeviLamina/BDS 将该包命名为 `DebugDrawerPacket`，Sculk Protocol 中同一 ID 命名为 `PrimitiveShapes`：
    - `mNetworkId`：由 `hologramName + 0` 稳定哈希生成。
    - `mLocation`：悬浮字位置。
    - `mDimensionId`：悬浮字维度 ID。
-   - `mMaxRenderDistance`：可视距离。
-   - `mColor`：默认白色 ARGB。
-   - `PrimitiveText`：文本、背景色、深度测试、背面显示参数。
+   - `TextDataPayload`：只写合并后的文本字符串。
 4. 更新文本时复用相同 `mNetworkId` 重新发送 TEXT shape。
 5. 删除或隐藏时发送同一个 `mNetworkId`、空 `mType`、空 payload 的 shape remove 包。
 
-该设计避免了旧实现的虚拟实体链路，也避免了 `MoveActorAbsolutePacket` 在当前 BDS/Protocol 组合下反复校验失败的问题。
+该设计避免了旧实现的虚拟实体链路，也避免了 `MoveActorAbsolutePacket` 在当前 BDS/Protocol 组合下反复校验失败的问题。注意当前运行时的 `ShapeDataPayload` 字段顺序和 `TextDataPayload` 与部分第三方 `PrimitiveShapesPacket` 文档不同，Phantom 的写包器按 LeviLamina/BDS 头文件的 Debug Drawer 线格式写入。
 
 ## 可见性
 
