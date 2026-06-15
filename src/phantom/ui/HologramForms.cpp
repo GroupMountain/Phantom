@@ -111,6 +111,10 @@ template <class T>
     return joined;
 }
 
+[[nodiscard]] bool isDynamic(phantom::hologram::HologramLine const& line) {
+    return line.updateIntervalMs > 0 || line.parseVariables || line.content.size() > 1;
+}
+
 [[nodiscard]] std::string joinContent(phantom::hologram::HologramLine const& line) {
     auto const& content = line.content.empty() ? std::vector<std::string>{line.text} : line.content;
     std::string joined;
@@ -121,6 +125,42 @@ template <class T>
         joined += content[i];
     }
     return joined;
+}
+
+[[nodiscard]] std::vector<std::string> contentFrames(phantom::hologram::HologramLine const& line) {
+    if (!line.content.empty()) {
+        return line.content;
+    }
+    return {line.text};
+}
+
+[[nodiscard]] std::string preview(std::string const& text, std::size_t maxLen = 36) {
+    if (text.empty()) {
+        return "";
+    }
+    if (text.size() <= maxLen) {
+        return text;
+    }
+    return text.substr(0, maxLen) + "...";
+}
+
+void saveDynamicLine(
+    std::string const&       name,
+    std::size_t              index,
+    std::vector<std::string> frames,
+    uint64_t                 intervalMs,
+    bool                     parseVariables
+) {
+    if (frames.empty()) {
+        frames.push_back("");
+    }
+    hologram::HologramService::getInstance().setLineDynamic(
+        name,
+        index,
+        std::move(frames),
+        intervalMs,
+        parseVariables
+    );
 }
 
 [[nodiscard]] std::string dimName(int dim) {
@@ -280,18 +320,102 @@ void openLines(Player& player, std::string name) {
         openMain(player);
         return;
     }
-    ll::form::CustomForm form{trf(player, "phantom.form.lines.title", {{"name", name}})};
-    form.appendInput(
-        "lines",
-        tr(player, "phantom.form.field.lines"),
-        tr(player, "phantom.form.field.lines.placeholder"),
-        joinLines(*hologram)
-    );
+    ll::form::SimpleForm form{
+        trf(player, "phantom.form.lines.title", {{"name", name}}),
+        trf(player, "phantom.form.lines.content", {{"count", std::to_string(hologram->lines.size())}})
+    };
+    form.appendButton(tr(player, "phantom.form.lines.add"), [name](Player& p) { openAddLine(p, name); });
+    for (std::size_t i = 0; i < hologram->lines.size(); ++i) {
+        auto const& line  = hologram->lines[i];
+        auto        label = trf(
+            player,
+            "phantom.form.lines.item",
+            {
+                {"line", std::to_string(i + 1)},
+                {"state", tr(player, isDynamic(line) ? "phantom.form.state.dynamic" : "phantom.form.state.static")},
+                {"text", preview(line.text.empty() ? tr(player, "phantom.form.empty") : line.text)}
+            }
+        );
+        form.appendButton(label, [name, i](Player& p) { openLineMenu(p, name, i); });
+    }
+    form.appendButton(tr(player, "phantom.form.back"), [name](Player& p) { openEditor(p, name); });
+    form.sendTo(player);
+}
+
+void openLineMenu(Player& player, std::string name, std::size_t index) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram || index >= hologram->lines.size()) {
+        openLines(player, name);
+        return;
+    }
+    auto const& line = hologram->lines[index];
+    ll::form::SimpleForm form{
+        trf(player, "phantom.form.line.title", {{"line", std::to_string(index + 1)}}),
+        trf(player,
+            "phantom.form.line.content",
+            {
+                {"state", tr(player, isDynamic(line) ? "phantom.form.state.dynamic" : "phantom.form.state.static")},
+                {"text", line.text.empty() ? tr(player, "phantom.form.empty") : line.text},
+                {"variants", std::to_string(line.content.empty() ? 1 : line.content.size())},
+                {"interval", std::to_string(line.updateIntervalMs)}
+            })
+    };
+    form.appendButton(tr(player, "phantom.form.line.edit_text"), [name, index](Player& p) {
+        openLineText(p, name, index);
+    });
+    form.appendButton(tr(player, "phantom.form.line.dynamic_settings"), [name, index](Player& p) {
+        openDynamicLine(p, name, index);
+    });
+    form.appendButton(tr(player, "phantom.form.line.delete"), [name, index](Player& p) {
+        openRemoveLineConfirm(p, name, index);
+    });
+    form.appendButton(tr(player, "phantom.form.back"), [name](Player& p) { openLines(p, name); });
+    form.sendTo(player);
+}
+
+void openLineText(Player& player, std::string name, std::size_t index) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram || index >= hologram->lines.size()) {
+        openLines(player, name);
+        return;
+    }
+    ll::form::CustomForm form{
+        trf(player, "phantom.form.line.edit_text_title", {{"line", std::to_string(index + 1)}})
+    };
+    form.appendInput("text", tr(player, "phantom.form.field.line_text"), "", hologram->lines[index].text);
+    form.sendTo(player, [name, index](Player& p, CustomFormResult const& result, ll::form::FormCancelReason) {
+        if (result) {
+            hologram::HologramService::getInstance().setLine(name, index, valueOr<std::string>(result, "text", ""));
+        }
+        openLineMenu(p, name, index);
+    });
+}
+
+void openAddLine(Player& player, std::string name) {
+    ll::form::CustomForm form{tr(player, "phantom.form.lines.add_title")};
+    form.appendInput("text", tr(player, "phantom.form.field.line_text"), "", "");
     form.sendTo(player, [name](Player& p, CustomFormResult const& result, ll::form::FormCancelReason) {
         if (result) {
-            hologram::HologramService::getInstance().setLines(name, splitLines(valueOr<std::string>(result, "lines", "")));
+            hologram::HologramService::getInstance().appendLine(name, valueOr<std::string>(result, "text", ""));
         }
-        openEditor(p, name);
+        openLines(p, name);
+    });
+}
+
+void openRemoveLineConfirm(Player& player, std::string name, std::size_t index) {
+    ll::form::ModalForm form{
+        trf(player, "phantom.form.line.delete_title", {{"line", std::to_string(index + 1)}}),
+        tr(player, "phantom.form.line.delete_content"),
+        tr(player, "phantom.form.delete.confirm"),
+        tr(player, "phantom.form.delete.cancel")
+    };
+    form.sendTo(player, [name, index](Player& p, ll::form::ModalFormResult result, ll::form::FormCancelReason) {
+        if (result && *result == ll::form::ModalFormSelectedButton::Upper) {
+            hologram::HologramService::getInstance().removeLine(name, index);
+            openLines(p, name);
+            return;
+        }
+        openLineMenu(p, name, index);
     });
 }
 
@@ -307,11 +431,16 @@ void openDynamicLines(Player& player, std::string name) {
     };
     for (std::size_t i = 0; i < hologram->lines.size(); ++i) {
         auto const& line  = hologram->lines[i];
-        auto        label = std::to_string(i + 1) + ". ";
-        label += line.updateIntervalMs > 0 || line.parseVariables || line.content.size() > 1
-                   ? "[" + tr(player, "phantom.form.state.dynamic") + "] "
-                   : "[" + tr(player, "phantom.form.state.static") + "] ";
-        label += line.text.empty() ? "(" + tr(player, "phantom.form.empty") + ")" : line.text;
+        auto        label = trf(
+            player,
+            "phantom.form.dynamic.item",
+            {
+                {"line", std::to_string(i + 1)},
+                {"state", tr(player, isDynamic(line) ? "phantom.form.state.dynamic" : "phantom.form.state.static")},
+                {"interval", std::to_string(line.updateIntervalMs)},
+                {"text", preview(line.text.empty() ? tr(player, "phantom.form.empty") : line.text)}
+            }
+        );
         form.appendButton(label, [name, i](Player& p) { openDynamicLine(p, name, i); });
     }
     form.appendButton(tr(player, "phantom.form.back"), [name](Player& p) { openEditor(p, name); });
@@ -325,31 +454,199 @@ void openDynamicLine(Player& player, std::string name, std::size_t index) {
         return;
     }
     auto const& line = hologram->lines[index];
-    ll::form::CustomForm form{
-        trf(player, "phantom.form.dynamic.line_title", {{"line", std::to_string(index + 1)}})
+    auto dynamic = isDynamic(line);
+    ll::form::SimpleForm form{
+        trf(player, "phantom.form.dynamic.line_title", {{"line", std::to_string(index + 1)}}),
+        trf(player,
+            "phantom.form.dynamic.summary",
+            {
+                {"state", tr(player, dynamic ? "phantom.form.state.dynamic" : "phantom.form.state.static")},
+                {"variants", std::to_string(contentFrames(line).size())},
+                {"interval", std::to_string(line.updateIntervalMs)}
+            })
     };
-    form.appendLabel(tr(player, "phantom.form.dynamic.variables"));
-    form.appendInput(
-        "content",
-        tr(player, "phantom.form.field.content_pool"),
-        tr(player, "phantom.form.field.content_pool.placeholder"),
-        joinContent(line)
+    form.appendButton(
+        tr(player, dynamic ? "phantom.form.dynamic.disable" : "phantom.form.dynamic.enable"),
+        [name, index, dynamic, line](Player& p) {
+            if (dynamic) {
+                hologram::HologramService::getInstance().setLine(name, index, line.text);
+            } else {
+                auto frames = contentFrames(line);
+                if (frames.size() < 2) {
+                    frames.push_back(frames.front());
+                }
+                saveDynamicLine(name, index, std::move(frames), line.updateIntervalMs > 0 ? line.updateIntervalMs : 1000, line.parseVariables);
+            }
+            openDynamicLine(p, name, index);
+        }
     );
+    form.appendButton(tr(player, "phantom.form.dynamic.frames"), [name, index](Player& p) {
+        openDynamicFrames(p, name, index);
+    });
+    form.appendButton(tr(player, "phantom.form.dynamic.playback"), [name, index](Player& p) {
+        openDynamicPlayback(p, name, index);
+    });
+    form.appendButton(tr(player, "phantom.form.back"), [name, index](Player& p) { openLineMenu(p, name, index); });
+    form.sendTo(player);
+}
+
+void openDynamicFrames(Player& player, std::string name, std::size_t index) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram || index >= hologram->lines.size()) {
+        openDynamicLines(player, name);
+        return;
+    }
+    auto const& line   = hologram->lines[index];
+    auto        frames = contentFrames(line);
+    ll::form::SimpleForm form{
+        trf(player, "phantom.form.dynamic.frames_title", {{"line", std::to_string(index + 1)}}),
+        trf(player, "phantom.form.dynamic.frames_content", {{"count", std::to_string(frames.size())}})
+    };
+    form.appendButton(tr(player, "phantom.form.dynamic.frame_add"), [name, index](Player& p) {
+        openAddDynamicFrame(p, name, index);
+    });
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        form.appendButton(
+            trf(
+                player,
+                "phantom.form.dynamic.frame_item",
+                {{"frame", std::to_string(i + 1)}, {"text", preview(frames[i].empty() ? tr(player, "phantom.form.empty") : frames[i])}}
+            ),
+            [name, index, i](Player& p) { openDynamicFrame(p, name, index, i); }
+        );
+    }
+    form.appendButton(tr(player, "phantom.form.back"), [name, index](Player& p) { openDynamicLine(p, name, index); });
+    form.sendTo(player);
+}
+
+void openDynamicFrame(Player& player, std::string name, std::size_t index, std::size_t frameIndex) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram || index >= hologram->lines.size()) {
+        openDynamicLines(player, name);
+        return;
+    }
+    auto const& line   = hologram->lines[index];
+    auto        frames = contentFrames(line);
+    if (frameIndex >= frames.size()) {
+        openDynamicFrames(player, name, index);
+        return;
+    }
+
+    ll::form::SimpleForm form{
+        trf(player, "phantom.form.dynamic.frame_title", {{"frame", std::to_string(frameIndex + 1)}}),
+        frames[frameIndex]
+    };
+    form.appendButton(tr(player, "phantom.form.dynamic.frame_edit"), [name, index, frameIndex](Player& p) {
+        auto hologram = hologram::HologramService::getInstance().get(name);
+        if (!hologram || index >= hologram->lines.size()) {
+            openDynamicFrames(p, name, index);
+            return;
+        }
+        auto frames = contentFrames(hologram->lines[index]);
+        if (frameIndex >= frames.size()) {
+            openDynamicFrames(p, name, index);
+            return;
+        }
+        ll::form::CustomForm edit{
+            trf(p, "phantom.form.dynamic.frame_edit_title", {{"frame", std::to_string(frameIndex + 1)}})
+        };
+        edit.appendInput("text", tr(p, "phantom.form.dynamic.frame_text"), "", frames[frameIndex]);
+        edit.sendTo(p, [name, index, frameIndex](Player& p2, CustomFormResult const& result, ll::form::FormCancelReason) {
+            auto hologram = hologram::HologramService::getInstance().get(name);
+            if (result && hologram && index < hologram->lines.size()) {
+                auto frames = contentFrames(hologram->lines[index]);
+                if (frameIndex < frames.size()) {
+                    frames[frameIndex] = valueOr<std::string>(result, "text", "");
+                    saveDynamicLine(
+                        name,
+                        index,
+                        std::move(frames),
+                        hologram->lines[index].updateIntervalMs,
+                        hologram->lines[index].parseVariables
+                    );
+                }
+            }
+            openDynamicFrame(p2, name, index, frameIndex);
+        });
+    });
+    form.appendButton(tr(player, "phantom.form.dynamic.frame_delete"), [name, index, frameIndex](Player& p) {
+        openRemoveDynamicFrameConfirm(p, name, index, frameIndex);
+    });
+    form.appendButton(tr(player, "phantom.form.back"), [name, index](Player& p) { openDynamicFrames(p, name, index); });
+    form.sendTo(player);
+}
+
+void openAddDynamicFrame(Player& player, std::string name, std::size_t index) {
+    ll::form::CustomForm form{tr(player, "phantom.form.dynamic.frame_add_title")};
+    form.appendInput("text", tr(player, "phantom.form.dynamic.frame_text"), "", "");
+    form.sendTo(player, [name, index](Player& p, CustomFormResult const& result, ll::form::FormCancelReason) {
+        auto hologram = hologram::HologramService::getInstance().get(name);
+        if (result && hologram && index < hologram->lines.size()) {
+            auto frames = contentFrames(hologram->lines[index]);
+            frames.push_back(valueOr<std::string>(result, "text", ""));
+            saveDynamicLine(
+                name,
+                index,
+                std::move(frames),
+                hologram->lines[index].updateIntervalMs > 0 ? hologram->lines[index].updateIntervalMs : 1000,
+                hologram->lines[index].parseVariables
+            );
+        }
+        openDynamicFrames(p, name, index);
+    });
+}
+
+void openRemoveDynamicFrameConfirm(Player& player, std::string name, std::size_t index, std::size_t frameIndex) {
+    ll::form::ModalForm form{
+        trf(player, "phantom.form.dynamic.frame_delete_title", {{"frame", std::to_string(frameIndex + 1)}}),
+        tr(player, "phantom.form.dynamic.frame_delete_content"),
+        tr(player, "phantom.form.delete.confirm"),
+        tr(player, "phantom.form.delete.cancel")
+    };
+    form.sendTo(player, [name, index, frameIndex](Player& p, ll::form::ModalFormResult result, ll::form::FormCancelReason) {
+        auto hologram = hologram::HologramService::getInstance().get(name);
+        if (result && *result == ll::form::ModalFormSelectedButton::Upper && hologram && index < hologram->lines.size()) {
+            auto frames = contentFrames(hologram->lines[index]);
+            if (frames.size() > 1 && frameIndex < frames.size()) {
+                frames.erase(frames.begin() + static_cast<std::ptrdiff_t>(frameIndex));
+                saveDynamicLine(
+                    name,
+                    index,
+                    std::move(frames),
+                    hologram->lines[index].updateIntervalMs,
+                    hologram->lines[index].parseVariables
+                );
+            }
+        }
+        openDynamicFrames(p, name, index);
+    });
+}
+
+void openDynamicPlayback(Player& player, std::string name, std::size_t index) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram || index >= hologram->lines.size()) {
+        openDynamicLines(player, name);
+        return;
+    }
+    auto const& line = hologram->lines[index];
+    ll::form::CustomForm form{tr(player, "phantom.form.dynamic.playback_title")};
+    form.appendLabel(tr(player, "phantom.form.dynamic.variables"));
     form.appendInput(
         "interval",
         tr(player, "phantom.form.field.update_interval"),
         tr(player, "phantom.form.field.update_interval.placeholder"),
-        std::to_string(line.updateIntervalMs)
+        std::to_string(line.updateIntervalMs > 0 ? line.updateIntervalMs : 1000)
     );
     form.appendToggle("parse", tr(player, "phantom.form.field.parse_variables"), line.parseVariables);
     form.sendTo(player, [name, index](Player& p, CustomFormResult const& result, ll::form::FormCancelReason) {
-        if (result) {
-            auto content  = splitLines(valueOr<std::string>(result, "content", ""));
-            auto interval = parseUint64(valueOr<std::string>(result, "interval", "0"), 0);
+        auto hologram = hologram::HologramService::getInstance().get(name);
+        if (result && hologram && index < hologram->lines.size()) {
+            auto frames   = contentFrames(hologram->lines[index]);
+            auto interval = parseUint64(valueOr<std::string>(result, "interval", "1000"), 1000);
             auto parse    = valueOr<std::uint64_t>(result, "parse", 0) != 0;
-            hologram::HologramService::getInstance().setLineDynamic(name, index, std::move(content), interval, parse);
+            saveDynamicLine(name, index, std::move(frames), interval, parse);
         }
-        openDynamicLines(p, name);
+        openDynamicLine(p, name, index);
     });
 }
 
