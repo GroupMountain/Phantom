@@ -60,19 +60,16 @@ private:
     [[nodiscard]] Hologram* findUnlocked(std::string const& name);
     [[nodiscard]] Hologram const* findUnlocked(std::string const& name) const;
 
-    void spawnLine(Player& player, Hologram const& hologram, std::size_t lineIndex, std::string const& text);
-    void updateLine(Player& player, Hologram const& hologram, std::size_t lineIndex, std::string const& text);
-    void moveLine(Player& player, Hologram const& hologram, std::size_t lineIndex);
-    void removeLineFromClient(Player& player, std::string const& hologramName, std::size_t lineIndex);
+    void sendHologram(Player& player, Hologram const& hologram, std::string const& text);
+    void removeHologramFromClient(Player& player, Hologram const& hologram);
 
     mutable std::mutex mMutex;
     HologramStore      mStore{};
     bool               mInitialized{false};
     int                mTickCounter{0};
 
-    std::unordered_map<std::string, std::unordered_set<std::uint64_t>> mVisibleRuntimeIds;
-    std::unordered_map<std::string, std::unordered_map<std::uint64_t, std::pair<std::size_t, std::string>>>
-        mLineContentCache;
+    std::unordered_map<std::string, std::unordered_set<std::uint64_t>> mVisibleShapeIds;
+    std::unordered_map<std::string, std::unordered_map<std::uint64_t, std::string>> mLineContentCache;
     std::vector<ll::event::ListenerPtr>                               mListeners;
 };
 

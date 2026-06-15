@@ -1,6 +1,7 @@
 #include "phantom/hologram/HologramService.h"
 
 #include "mod/Phantom.h"
+#include "phantom/i18n/I18n.h"
 #include "phantom/net/SculkPacket.h"
 
 #include "ll/api/Config.h"
@@ -12,11 +13,8 @@
 
 #include "mc/world/level/Level.h"
 
-#include <sculk/protocol/codec/actor/ActorDataIDs.hpp>
-#include <sculk/protocol/codec/packet/AddActorPacket.hpp>
-#include <sculk/protocol/codec/packet/MoveActorAbsolutePacket.hpp>
-#include <sculk/protocol/codec/packet/RemoveActorPacket.hpp>
-#include <sculk/protocol/codec/packet/SetActorDataPacket.hpp>
+#include <sculk/protocol/codec/level/PrimitiveShapes.hpp>
+#include <sculk/protocol/codec/packet/PrimitiveShapesPacket.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -28,6 +26,25 @@ namespace phantom::hologram {
 namespace {
 
 auto& logger() { return Phantom::getInstance().getSelf().getLogger(); }
+
+void replaceAll(std::string& value, std::string_view from, std::string_view to) {
+    std::size_t pos = 0;
+    while ((pos = value.find(from, pos)) != std::string::npos) {
+        value.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+std::string logText(std::string_view key, std::initializer_list<std::pair<std::string_view, std::string>> args = {}) {
+    auto text = i18n::tr(key, Phantom::getInstance().getLanguage());
+    for (auto const& [name, value] : args) {
+        std::string placeholder = "{";
+        placeholder += name;
+        placeholder += "}";
+        replaceAll(text, placeholder, value);
+    }
+    return text;
+}
 
 [[nodiscard]] std::string uuidOf(Player const& player) { return player.getUuid().asString(); }
 
@@ -58,24 +75,12 @@ auto& logger() { return Phantom::getInstance().getSelf().getLogger(); }
     return {pos.x, pos.y, pos.z};
 }
 
-[[nodiscard]] Vec3 linePosition(Hologram const& hologram, std::size_t lineIndex) {
-    auto pos = hologram.position;
-    pos.y -= static_cast<float>(configuredLineSpacing(hologram) * static_cast<double>(lineIndex));
-    return pos;
-}
+[[nodiscard]] std::int32_t argb(std::uint32_t value) { return static_cast<std::int32_t>(value); }
 
 [[nodiscard]] uint64_t nowMs() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                      std::chrono::steady_clock::now().time_since_epoch()
     ).count());
-}
-
-void replaceAll(std::string& value, std::string_view from, std::string_view to) {
-    std::size_t pos = 0;
-    while ((pos = value.find(from, pos)) != std::string::npos) {
-        value.replace(pos, from.size(), to);
-        pos += to.size();
-    }
 }
 
 [[nodiscard]] std::vector<std::string> contentPool(HologramLine const& line) {
@@ -128,12 +133,15 @@ void replaceAll(std::string& value, std::string_view from, std::string_view to) 
     return {index, std::move(text)};
 }
 
-[[nodiscard]] bool shouldUpdateDynamicLine(HologramLine const& line) {
-    return line.parseVariables || line.updateIntervalMs > 0 || line.content.size() > 1;
-}
-
-[[nodiscard]] int64_t invisibleNametagFlags() {
-    return (int64_t{1} << 5) | (int64_t{1} << 14) | (int64_t{1} << 15);
+[[nodiscard]] std::string resolveHologramText(Player& player, Hologram const& hologram) {
+    std::string text;
+    for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
+        if (!text.empty()) {
+            text.push_back('\n');
+        }
+        text += resolveLineText(player, hologram, i).second;
+    }
+    return text;
 }
 
 LL_AUTO_TYPE_INSTANCE_HOOK(PhantomLevelTickHook, ll::memory::HookPriority::Normal, Level, &Level::$tick, void) {
@@ -181,7 +189,7 @@ void HologramService::shutdown() {
     }
     mListeners.clear();
     std::scoped_lock lock{mMutex};
-    mVisibleRuntimeIds.clear();
+    mVisibleShapeIds.clear();
     mLineContentCache.clear();
     mInitialized = false;
 }
@@ -462,7 +470,7 @@ bool HologramService::reload() {
     HologramStore next;
     auto const    path = storePath();
     if (!ll::config::loadConfig(next, path)) {
-        logger().warn("Hologram store was missing or invalid: {}", path.string());
+        logger().warn("{}", logText("phantom.log.store_missing", {{"path", path.string()}}));
         ll::config::saveConfig(next, path);
     }
     for (auto& hologram : next.holograms) {
@@ -494,53 +502,35 @@ bool HologramService::save() {
     return ll::config::saveConfig(snapshot, storePath());
 }
 
-void HologramService::spawnLine(Player& player, Hologram const& hologram, std::size_t lineIndex, std::string const& text) {
-    sculk::protocol::AddActorPacket packet;
-    packet.mActorRuntimeId = runtimeIdFor(hologram.name, lineIndex);
-    packet.mActorUniqueId  = uniqueIdFor(hologram.name, lineIndex);
-    packet.mIdentifier     = "minecraft:armor_stand";
-    packet.mPosition       = toProtocol(linePosition(hologram, lineIndex));
-    packet.mVelocity       = {0.0f, 0.0f, 0.0f};
-    packet.mRotation       = {0.0f, 0.0f};
-    packet.mYHeadRotation  = 0.0f;
-    packet.mYBodyRotation  = 0.0f;
-    packet.mMetaData.mDataItems = {
-        {sculk::protocol::ActorDataIDs::Reserved0, invisibleNametagFlags()},
-        {sculk::protocol::ActorDataIDs::Name, text},
-        {sculk::protocol::ActorDataIDs::NametagAlwaysShow, static_cast<std::uint8_t>(1)},
-        {sculk::protocol::ActorDataIDs::NameplateRenderDistanceMax, static_cast<float>(configuredViewDistance(hologram))}
+void HologramService::sendHologram(Player& player, Hologram const& hologram, std::string const& text) {
+    sculk::protocol::PrimitiveShapes shape;
+    shape.mNetworkId         = runtimeIdFor(hologram.name, 0);
+    shape.mType              = sculk::protocol::PrimitiveShapesType::Text;
+    shape.mLocation          = toProtocol(hologram.position);
+    shape.mDimensionId       = hologram.dimension;
+    shape.mMaxRenderDistance = static_cast<float>(configuredViewDistance(hologram));
+    shape.mColor             = argb(0xFFFFFFFFu);
+    shape.mShape             = sculk::protocol::PrimitiveText{
+        .mText             = text,
+        .mUseRotation      = false,
+        .mBackgroundColor  = argb(0x00000000u),
+        .mDepthTest        = false,
+        .mShowBackface     = true,
+        .mShowTextBackface = true,
     };
+
+    sculk::protocol::PrimitiveShapesPacket packet;
+    packet.mShapes.emplace_back(std::move(shape));
     net::sendSculkPacketTo(player, packet, logger());
 }
 
-void HologramService::updateLine(Player& player, Hologram const& hologram, std::size_t lineIndex, std::string const& text) {
-    sculk::protocol::SetActorDataPacket packet;
-    packet.mActorRuntimeId = runtimeIdFor(hologram.name, lineIndex);
-    packet.mTick           = 0;
-    packet.mMetaData.mDataItems = {
-        {sculk::protocol::ActorDataIDs::Reserved0, invisibleNametagFlags()},
-        {sculk::protocol::ActorDataIDs::Name, text},
-        {sculk::protocol::ActorDataIDs::NametagAlwaysShow, static_cast<std::uint8_t>(1)},
-        {sculk::protocol::ActorDataIDs::NameplateRenderDistanceMax, static_cast<float>(configuredViewDistance(hologram))}
-    };
-    net::sendSculkPacketTo(player, packet, logger());
-}
+void HologramService::removeHologramFromClient(Player& player, Hologram const& hologram) {
+    sculk::protocol::PrimitiveShapes shape;
+    shape.mNetworkId   = runtimeIdFor(hologram.name, 0);
+    shape.mDimensionId = hologram.dimension;
 
-void HologramService::moveLine(Player& player, Hologram const& hologram, std::size_t lineIndex) {
-    sculk::protocol::MoveActorAbsolutePacket packet;
-    packet.mActorRuntimeId  = runtimeIdFor(hologram.name, lineIndex);
-    packet.mHeader          = 0;
-    packet.mPosition        = toProtocol(linePosition(hologram, lineIndex));
-    packet.mRotationX       = 0;
-    packet.mRotationY       = 0;
-    packet.mRotationYHead   = 0;
-    packet.mForceCompletion = true;
-    net::sendSculkPacketTo(player, packet, logger());
-}
-
-void HologramService::removeLineFromClient(Player& player, std::string const& hologramName, std::size_t lineIndex) {
-    sculk::protocol::RemoveActorPacket packet;
-    packet.mActorUniqueId = uniqueIdFor(hologramName, lineIndex);
+    sculk::protocol::PrimitiveShapesPacket packet;
+    packet.mShapes.emplace_back(std::move(shape));
     net::sendSculkPacketTo(player, packet, logger());
 }
 
@@ -553,24 +543,20 @@ void HologramService::refreshPlayer(Player& player, bool force) {
         if (!nearEnough(player, hologram)) {
             continue;
         }
-        for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
-            expected.insert(runtimeIdFor(hologram.name, i));
-        }
+        expected.insert(runtimeIdFor(hologram.name, 0));
     }
 
     std::unordered_set<std::uint64_t> previous;
     {
         std::scoped_lock lock{mMutex};
-        previous = mVisibleRuntimeIds[playerKey];
+        previous = mVisibleShapeIds[playerKey];
     }
 
     if (force) {
         for (auto runtimeId : previous) {
             for (auto const& hologram : snapshot) {
-                for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
-                    if (runtimeId == runtimeIdFor(hologram.name, i)) {
-                        removeLineFromClient(player, hologram.name, i);
-                    }
+                if (runtimeId == runtimeIdFor(hologram.name, 0)) {
+                    removeHologramFromClient(player, hologram);
                 }
             }
         }
@@ -580,43 +566,40 @@ void HologramService::refreshPlayer(Player& player, bool force) {
     }
 
     for (auto const& hologram : snapshot) {
-        for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
-            auto const runtimeId = runtimeIdFor(hologram.name, i);
-            if (!expected.contains(runtimeId)) {
-                if (previous.contains(runtimeId)) {
-                    removeLineFromClient(player, hologram.name, i);
-                    std::scoped_lock lock{mMutex};
-                    mLineContentCache[playerKey].erase(runtimeId);
-                }
-                continue;
-            }
-            auto resolved = resolveLineText(player, hologram, i);
-            if (!previous.contains(runtimeId)) {
-                spawnLine(player, hologram, i, resolved.second);
+        auto const runtimeId = runtimeIdFor(hologram.name, 0);
+        if (!expected.contains(runtimeId)) {
+            if (previous.contains(runtimeId)) {
+                removeHologramFromClient(player, hologram);
                 std::scoped_lock lock{mMutex};
-                mLineContentCache[playerKey][runtimeId] = std::move(resolved);
-            } else {
-                moveLine(player, hologram, i);
-                bool shouldUpdate = force;
-                {
-                    std::scoped_lock lock{mMutex};
-                    auto& cache = mLineContentCache[playerKey][runtimeId];
-                    if (shouldUpdateDynamicLine(hologram.lines[i])
-                        && (cache.first != resolved.first || cache.second != resolved.second)) {
-                        shouldUpdate = true;
-                        cache        = resolved;
-                    }
+                mLineContentCache[playerKey].erase(runtimeId);
+            }
+            continue;
+        }
+
+        auto resolvedText = resolveHologramText(player, hologram);
+        if (!previous.contains(runtimeId)) {
+            sendHologram(player, hologram, resolvedText);
+            std::scoped_lock lock{mMutex};
+            mLineContentCache[playerKey][runtimeId] = std::move(resolvedText);
+        } else {
+            bool shouldUpdate = force;
+            {
+                std::scoped_lock lock{mMutex};
+                auto& cache = mLineContentCache[playerKey][runtimeId];
+                if (cache != resolvedText) {
+                    shouldUpdate = true;
+                    cache        = resolvedText;
                 }
-                if (shouldUpdate) {
-                    updateLine(player, hologram, i, resolved.second);
-                }
+            }
+            if (shouldUpdate) {
+                sendHologram(player, hologram, resolvedText);
             }
         }
     }
 
     {
         std::scoped_lock lock{mMutex};
-        mVisibleRuntimeIds[playerKey] = std::move(expected);
+        mVisibleShapeIds[playerKey] = std::move(expected);
     }
 }
 
@@ -624,7 +607,7 @@ void HologramService::despawnAllFor(Player& player) {
     auto const playerKey = uuidOf(player);
     {
         std::scoped_lock lock{mMutex};
-        mVisibleRuntimeIds.erase(playerKey);
+        mVisibleShapeIds.erase(playerKey);
         mLineContentCache.erase(playerKey);
     }
 }

@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace phantom::commands {
@@ -90,7 +91,34 @@ struct DynamicLineActionParam {
 }
 
 [[nodiscard]] std::string tr(CommandOrigin const& origin, std::string_view key) {
-    return i18n::tr(key, origin.getLocaleCode());
+    auto locale = origin.getLocaleCode();
+    if (locale.empty()) {
+        locale = Phantom::getInstance().getLanguage();
+    }
+    return i18n::tr(key, locale);
+}
+
+void replaceAll(std::string& value, std::string_view from, std::string_view to) {
+    std::size_t pos = 0;
+    while ((pos = value.find(from, pos)) != std::string::npos) {
+        value.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+[[nodiscard]] std::string trf(
+    CommandOrigin const& origin,
+    std::string_view     key,
+    std::initializer_list<std::pair<std::string_view, std::string>> args
+) {
+    auto text = tr(origin, key);
+    for (auto const& [name, value] : args) {
+        std::string placeholder = "{";
+        placeholder += name;
+        placeholder += "}";
+        replaceAll(text, placeholder, value);
+    }
+    return text;
 }
 
 void listHolograms(CommandOrigin const& origin, CommandOutput& output) {
@@ -100,11 +128,23 @@ void listHolograms(CommandOrigin const& origin, CommandOutput& output) {
         return;
     }
     std::stringstream stream;
-    stream << "Phantom holograms (" << holograms.size() << "):";
+    stream << trf(origin, "phantom.command.list_header", {{"count", std::to_string(holograms.size())}});
     for (auto const& hologram : holograms) {
-        stream << "\n- " << hologram.name << " [" << (hologram.enabled ? "on" : "off") << "] "
-               << "lines=" << hologram.lines.size() << " dim=" << hologram.dimension << " pos=(" << hologram.position.x
-               << ", " << hologram.position.y << ", " << hologram.position.z << ")";
+        stream << '\n'
+               << trf(
+                      origin,
+                      "phantom.command.list_item",
+                      {
+                          {"name", hologram.name},
+                          {"state",
+                           tr(origin, hologram.enabled ? "phantom.command.state_on" : "phantom.command.state_off")},
+                          {"lines", std::to_string(hologram.lines.size())},
+                          {"dimension", std::to_string(hologram.dimension)},
+                          {"x", std::to_string(hologram.position.x)},
+                          {"y", std::to_string(hologram.position.y)},
+                          {"z", std::to_string(hologram.position.z)},
+                      }
+                  );
     }
     output.success(stream.str());
 }
@@ -135,7 +175,7 @@ void handleAction(CommandOrigin const& origin, CommandOutput& output, PhantomAct
         output.success(tr(origin, "phantom.command.reloaded"));
         break;
     default:
-        output.error("This action requires more arguments.");
+        output.error(tr(origin, "phantom.command.requires_more_args"));
         break;
     }
 }
@@ -165,7 +205,7 @@ void handleNamed(CommandOrigin const& origin, CommandOutput& output, PhantomActi
         output.success(ok ? tr(origin, "phantom.command.updated") : tr(origin, "phantom.command.not_found"));
         break;
     default:
-        output.error("Unsupported named action.");
+        output.error(tr(origin, "phantom.command.unsupported_named_action"));
         break;
     }
 }
@@ -196,18 +236,18 @@ void handleText(CommandOrigin const& origin, CommandOutput& output, PhantomActio
         output.success(ok ? tr(origin, "phantom.command.updated") : tr(origin, "phantom.command.not_found"));
         break;
     default:
-        output.error("Unsupported text action.");
+        output.error(tr(origin, "phantom.command.unsupported_text_action"));
         break;
     }
 }
 
 void handleLine(CommandOrigin const& origin, CommandOutput& output, PhantomAction action, std::string const& name, int index) {
     if (index < 1) {
-        output.error("Line index starts at 1.");
+        output.error(tr(origin, "phantom.command.line_index_starts_at_one"));
         return;
     }
     if (action != PhantomAction::removeline) {
-        output.error("Unsupported line action.");
+        output.error(tr(origin, "phantom.command.unsupported_line_action"));
         return;
     }
     auto ok = hologram::HologramService::getInstance().removeLine(name, static_cast<std::size_t>(index - 1));
@@ -216,7 +256,7 @@ void handleLine(CommandOrigin const& origin, CommandOutput& output, PhantomActio
 
 void handleSetLine(CommandOrigin const& origin, CommandOutput& output, std::string const& name, int index, std::string const& text) {
     if (index < 1) {
-        output.error("Line index starts at 1.");
+        output.error(tr(origin, "phantom.command.line_index_starts_at_one"));
         return;
     }
     auto ok = hologram::HologramService::getInstance().setLine(name, static_cast<std::size_t>(index - 1), text);
@@ -248,7 +288,7 @@ void handleDynamicLine(
     std::string const&  text
 ) {
     if (index < 1) {
-        output.error("Line index starts at 1.");
+        output.error(tr(origin, "phantom.command.line_index_starts_at_one"));
         return;
     }
     auto ok = hologram::HologramService::getInstance().setLineDynamic(
@@ -265,7 +305,11 @@ void handleDynamicLine(
 
 void registerCommands() {
     auto& command = ll::command::CommandRegistrar::getServerInstance()
-                        .getOrCreateCommand("phantom", "Manage Phantom holograms", CommandPermissionLevel::GameDirectors);
+                        .getOrCreateCommand(
+                            "phantom",
+                            i18n::tr("phantom.command.description", Phantom::getInstance().getLanguage()),
+                            CommandPermissionLevel::GameDirectors
+                        );
 
     command.alias("hologram");
     command.alias("holo");

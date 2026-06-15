@@ -14,6 +14,7 @@ public:
         double lineSpacing{0.27};
         int    refreshIntervalTicks{10};
         int    dynamicRefreshIntervalTicks{10};
+        std::string language{"auto"};
     };
 
     static Phantom& getInstance();
@@ -22,6 +23,7 @@ public:
 
     [[nodiscard]] ll::mod::NativeMod& getSelf() const { return mSelf; }
     [[nodiscard]] ModuleConfig const& getConfig() const { return mConfig; }
+    [[nodiscard]] std::string const& getLanguage() const { return mLanguage; }
 
     bool load();
     bool enable();
@@ -32,6 +34,7 @@ private:
 
     ll::mod::NativeMod& mSelf;
     ModuleConfig        mConfig{};
+    std::string         mLanguage{"en_US"};
 };
 
 } // namespace phantom
