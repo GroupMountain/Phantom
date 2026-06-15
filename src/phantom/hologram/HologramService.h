@@ -34,6 +34,13 @@ public:
     bool setPosition(std::string const& name, Vec3 const& position, int dimension);
     bool setOptions(std::string const& name, bool enabled, double viewDistance, double lineSpacing);
     bool setLines(std::string const& name, std::vector<std::string> lines);
+    bool setLineDynamic(
+        std::string const&       name,
+        std::size_t              index,
+        std::vector<std::string> content,
+        uint64_t                 updateIntervalMs,
+        bool                     parseVariables
+    );
     bool appendLine(std::string const& name, std::string line);
     bool insertLine(std::string const& name, std::size_t index, std::string line);
     bool setLine(std::string const& name, std::size_t index, std::string line);
@@ -53,8 +60,8 @@ private:
     [[nodiscard]] Hologram* findUnlocked(std::string const& name);
     [[nodiscard]] Hologram const* findUnlocked(std::string const& name) const;
 
-    void spawnLine(Player& player, Hologram const& hologram, std::size_t lineIndex);
-    void updateLine(Player& player, Hologram const& hologram, std::size_t lineIndex);
+    void spawnLine(Player& player, Hologram const& hologram, std::size_t lineIndex, std::string const& text);
+    void updateLine(Player& player, Hologram const& hologram, std::size_t lineIndex, std::string const& text);
     void moveLine(Player& player, Hologram const& hologram, std::size_t lineIndex);
     void removeLineFromClient(Player& player, std::string const& hologramName, std::size_t lineIndex);
 
@@ -64,6 +71,8 @@ private:
     int                mTickCounter{0};
 
     std::unordered_map<std::string, std::unordered_set<std::uint64_t>> mVisibleRuntimeIds;
+    std::unordered_map<std::string, std::unordered_map<std::uint64_t, std::pair<std::size_t, std::string>>>
+        mLineContentCache;
     std::vector<ll::event::ListenerPtr>                               mListeners;
 };
 

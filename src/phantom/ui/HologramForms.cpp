@@ -53,6 +53,22 @@ template <class T>
     return result.ec == std::errc{} ? parsed : fallback;
 }
 
+[[nodiscard]] int parseInt(std::string const& value, int fallback) {
+    int  parsed = fallback;
+    auto first  = value.data();
+    auto last   = value.data() + value.size();
+    auto result = std::from_chars(first, last, parsed);
+    return result.ec == std::errc{} ? parsed : fallback;
+}
+
+[[nodiscard]] uint64_t parseUint64(std::string const& value, uint64_t fallback) {
+    uint64_t parsed = fallback;
+    auto     first  = value.data();
+    auto     last   = value.data() + value.size();
+    auto     result = std::from_chars(first, last, parsed);
+    return result.ec == std::errc{} ? parsed : fallback;
+}
+
 [[nodiscard]] std::string joinLines(phantom::hologram::Hologram const& hologram) {
     std::string joined;
     for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
@@ -64,6 +80,18 @@ template <class T>
     return joined;
 }
 
+[[nodiscard]] std::string joinContent(phantom::hologram::HologramLine const& line) {
+    auto const& content = line.content.empty() ? std::vector<std::string>{line.text} : line.content;
+    std::string joined;
+    for (std::size_t i = 0; i < content.size(); ++i) {
+        if (i != 0) {
+            joined += '\n';
+        }
+        joined += content[i];
+    }
+    return joined;
+}
+
 [[nodiscard]] std::string dimName(int dim) {
     switch (dim) {
     case 1:
@@ -71,7 +99,7 @@ template <class T>
     case 2:
         return "The End";
     default:
-        return "Overworld";
+        return dim == 0 ? "Overworld" : "Dimension " + std::to_string(dim);
     }
 }
 
@@ -102,7 +130,7 @@ void openCreate(Player& player) {
     form.appendInput("x", "X", "", std::to_string(pos.x));
     form.appendInput("y", "Y", "", std::to_string(pos.y + 2.2f));
     form.appendInput("z", "Z", "", std::to_string(pos.z));
-    form.appendDropdown("dim", "Dimension", {"Overworld", "Nether", "The End"}, static_cast<size_t>(std::clamp(static_cast<int>(player.getDimensionId()), 0, 2)));
+    form.appendInput("dim", "Dimension ID", "0, 1, 2, or a custom dimension id", std::to_string(static_cast<int>(player.getDimensionId())));
     form.appendToggle("enabled", "Enabled", true);
     form.sendTo(player, [](Player& p, CustomFormResult const& result, ll::form::FormCancelReason) {
         if (!result) {
@@ -116,7 +144,7 @@ void openCreate(Player& player) {
             parseFloat(valueOr<std::string>(result, "y", "0"), 0.0f),
             parseFloat(valueOr<std::string>(result, "z", "0"), 0.0f)
         };
-        hologram.dimension = static_cast<int>(valueOr<std::uint64_t>(result, "dim", 0));
+        hologram.dimension = parseInt(valueOr<std::string>(result, "dim", "0"), static_cast<int>(p.getDimensionId()));
         hologram.enabled   = valueOr<std::uint64_t>(result, "enabled", 1) != 0;
         for (auto& line : splitLines(valueOr<std::string>(result, "text", ""))) {
             hologram.lines.push_back({std::move(line)});
@@ -138,6 +166,7 @@ void openEditor(Player& player, std::string name) {
         "Lines: " + std::to_string(hologram->lines.size()) + "\nDimension: " + dimName(hologram->dimension)
     };
     form.appendButton("Edit lines", [name](Player& p) { openLines(p, name); });
+    form.appendButton("Dynamic lines", [name](Player& p) { openDynamicLines(p, name); });
     form.appendButton("Move to me", [name](Player& p) {
         hologram::HologramService::getInstance().moveNearPlayer(name, p);
         openEditor(p, name);
@@ -151,7 +180,7 @@ void openEditor(Player& player, std::string name) {
         edit.appendInput("x", "X", "", std::to_string(h.position.x));
         edit.appendInput("y", "Y", "", std::to_string(h.position.y));
         edit.appendInput("z", "Z", "", std::to_string(h.position.z));
-        edit.appendDropdown("dim", "Dimension", {"Overworld", "Nether", "The End"}, static_cast<size_t>(std::clamp(h.dimension, 0, 2)));
+        edit.appendInput("dim", "Dimension ID", "Supports custom dimensions", std::to_string(h.dimension));
         edit.appendToggle("enabled", "Enabled", h.enabled);
         edit.appendSlider("view", "View distance", 8.0, 128.0, 1.0, h.viewDistance > 0.0 ? h.viewDistance : 48.0);
         edit.appendSlider("spacing", "Line spacing", 0.15, 0.60, 0.01, h.lineSpacing > 0.0 ? h.lineSpacing : 0.27);
@@ -165,7 +194,7 @@ void openEditor(Player& player, std::string name) {
                 parseFloat(valueOr<std::string>(result, "y", "0"), 0.0f),
                 parseFloat(valueOr<std::string>(result, "z", "0"), 0.0f)
             };
-            auto dim     = static_cast<int>(valueOr<std::uint64_t>(result, "dim", 0));
+            auto dim     = parseInt(valueOr<std::string>(result, "dim", "0"), 0);
             auto enabled = valueOr<std::uint64_t>(result, "enabled", 1) != 0;
             auto view    = valueOr<double>(result, "view", 48.0);
             auto spacing = valueOr<double>(result, "spacing", 0.27);
@@ -192,6 +221,47 @@ void openLines(Player& player, std::string name) {
             hologram::HologramService::getInstance().setLines(name, splitLines(valueOr<std::string>(result, "lines", "")));
         }
         openEditor(p, name);
+    });
+}
+
+void openDynamicLines(Player& player, std::string name) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram) {
+        openMain(player);
+        return;
+    }
+    ll::form::SimpleForm form{"Dynamic lines " + name, "Select a line to configure dynamic content."};
+    for (std::size_t i = 0; i < hologram->lines.size(); ++i) {
+        auto const& line  = hologram->lines[i];
+        auto        label = std::to_string(i + 1) + ". ";
+        label += line.updateIntervalMs > 0 || line.parseVariables || line.content.size() > 1 ? "[dynamic] " : "[static] ";
+        label += line.text.empty() ? "(empty)" : line.text;
+        form.appendButton(label, [name, i](Player& p) { openDynamicLine(p, name, i); });
+    }
+    form.appendButton("< Back", [name](Player& p) { openEditor(p, name); });
+    form.sendTo(player);
+}
+
+void openDynamicLine(Player& player, std::string name, std::size_t index) {
+    auto hologram = hologram::HologramService::getInstance().get(name);
+    if (!hologram || index >= hologram->lines.size()) {
+        openDynamicLines(player, name);
+        return;
+    }
+    auto const& line = hologram->lines[index];
+    ll::form::CustomForm form{"Dynamic line " + std::to_string(index + 1)};
+    form.appendLabel("Variables: {player}, {online}, {dimension}, {hologram}, {line}, {contentIndex}, {x}, {y}, {z}");
+    form.appendInput("content", "Content pool", "One variant per row", joinContent(line));
+    form.appendInput("interval", "Update interval ms", "0 = no rotation", std::to_string(line.updateIntervalMs));
+    form.appendToggle("parse", "Parse variables", line.parseVariables);
+    form.sendTo(player, [name, index](Player& p, CustomFormResult const& result, ll::form::FormCancelReason) {
+        if (result) {
+            auto content  = splitLines(valueOr<std::string>(result, "content", ""));
+            auto interval = parseUint64(valueOr<std::string>(result, "interval", "0"), 0);
+            auto parse    = valueOr<std::uint64_t>(result, "parse", 0) != 0;
+            hologram::HologramService::getInstance().setLineDynamic(name, index, std::move(content), interval, parse);
+        }
+        openDynamicLines(p, name);
     });
 }
 

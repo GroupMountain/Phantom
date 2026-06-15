@@ -9,7 +9,10 @@
 namespace phantom::hologram {
 
 struct HologramLine {
-    std::string text;
+    std::string              text;
+    std::vector<std::string> content;
+    uint64_t                 updateIntervalMs{0};
+    bool                     parseVariables{false};
 };
 
 struct Hologram {

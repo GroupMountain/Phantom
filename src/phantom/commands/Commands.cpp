@@ -15,8 +15,11 @@
 #include "mc/world/actor/Actor.h"
 #include "mc/world/actor/player/Player.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace phantom::commands {
 namespace {
@@ -32,6 +35,7 @@ enum class PhantomAction : unsigned char {
     disable,
     append,
     setline,
+    dynamicline,
     removeline,
 };
 
@@ -62,6 +66,15 @@ struct SetLineActionParam {
     PhantomAction action;
     std::string   name;
     int           index;
+    std::string   text;
+};
+
+struct DynamicLineActionParam {
+    PhantomAction action;
+    std::string   name;
+    int           index;
+    int           intervalMs;
+    int           parseVariables;
     std::string   text;
 };
 
@@ -210,6 +223,44 @@ void handleSetLine(CommandOrigin const& origin, CommandOutput& output, std::stri
     output.success(ok ? tr(origin, "phantom.command.updated") : tr(origin, "phantom.command.not_found"));
 }
 
+std::vector<std::string> splitVariants(std::string const& text) {
+    std::vector<std::string> result;
+    std::string              current;
+    for (auto ch : text) {
+        if (ch == '|') {
+            result.push_back(std::move(current));
+            current.clear();
+        } else {
+            current.push_back(ch);
+        }
+    }
+    result.push_back(std::move(current));
+    return result;
+}
+
+void handleDynamicLine(
+    CommandOrigin const& origin,
+    CommandOutput&      output,
+    std::string const&  name,
+    int                 index,
+    int                 intervalMs,
+    int                 parseVariables,
+    std::string const&  text
+) {
+    if (index < 1) {
+        output.error("Line index starts at 1.");
+        return;
+    }
+    auto ok = hologram::HologramService::getInstance().setLineDynamic(
+        name,
+        static_cast<std::size_t>(index - 1),
+        splitVariants(text),
+        static_cast<uint64_t>(std::max(0, intervalMs)),
+        parseVariables != 0
+    );
+    output.success(ok ? tr(origin, "phantom.command.updated") : tr(origin, "phantom.command.not_found"));
+}
+
 } // namespace
 
 void registerCommands() {
@@ -247,6 +298,24 @@ void registerCommands() {
             handleSetLine(origin, output, param.name, param.index, param.text);
         }
     );
+    command.overload<DynamicLineActionParam>()
+        .required("action")
+        .required("name")
+        .required("index")
+        .required("intervalMs")
+        .required("parseVariables")
+        .required("text")
+        .execute([](CommandOrigin const& origin, CommandOutput& output, DynamicLineActionParam const& param) {
+            handleDynamicLine(
+                origin,
+                output,
+                param.name,
+                param.index,
+                param.intervalMs,
+                param.parseVariables,
+                param.text
+            );
+        });
 }
 
 } // namespace phantom::commands

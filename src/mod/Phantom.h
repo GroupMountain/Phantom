@@ -13,6 +13,7 @@ public:
         double viewDistance{48.0};
         double lineSpacing{0.27};
         int    refreshIntervalTicks{10};
+        int    dynamicRefreshIntervalTicks{10};
     };
 
     static Phantom& getInstance();
