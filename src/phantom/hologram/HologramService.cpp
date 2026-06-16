@@ -277,7 +277,7 @@ bool HologramService::remove(std::string const& name) {
         }
         mStore.holograms.erase(iter.begin(), iter.end());
         mLineCallbacks.erase(normalized);
-        mLineCallbackUpdateCache.erase(normalized);
+        mLineCallbackUpdateCache.clear();
     }
     save();
     refreshAll(true);
@@ -301,11 +301,7 @@ bool HologramService::rename(std::string const& oldName, std::string const& newN
             mLineCallbacks[normalizedNew] = std::move(callbackIter->second);
             mLineCallbacks.erase(callbackIter);
         }
-        if (auto cacheIter = mLineCallbackUpdateCache.find(normalizedOld);
-            cacheIter != mLineCallbackUpdateCache.end()) {
-            mLineCallbackUpdateCache[normalizedNew] = std::move(cacheIter->second);
-            mLineCallbackUpdateCache.erase(cacheIter);
-        }
+        mLineCallbackUpdateCache.clear();
         hologram->name = normalizedNew;
     }
     save();
@@ -428,10 +424,7 @@ bool HologramService::setLine(std::string const& name, std::size_t index, std::s
                 mLineCallbacks.erase(callbackIter);
             }
         }
-        if (auto cacheIter = mLineCallbackUpdateCache.find(hologram->name);
-            cacheIter != mLineCallbackUpdateCache.end()) {
-            cacheIter->second.clear();
-        }
+        mLineCallbackUpdateCache.clear();
     }
     save();
     refreshAll(true);
@@ -487,7 +480,7 @@ bool HologramService::setLineCallback(
                 mLineCallbacks.erase(callbackIter);
             }
         }
-        mLineCallbackUpdateCache[hologram->name].clear();
+        mLineCallbackUpdateCache.clear();
     }
     refreshAll(true);
     return true;
@@ -521,10 +514,7 @@ bool HologramService::removeLine(std::string const& name, std::size_t index) {
                 callbackIter->second = std::move(nextCallbacks);
             }
         }
-        if (auto cacheIter = mLineCallbackUpdateCache.find(hologram->name);
-            cacheIter != mLineCallbackUpdateCache.end()) {
-            cacheIter->second.clear();
-        }
+        mLineCallbackUpdateCache.clear();
         if (hologram->lines.empty()) {
             hologram->lines.push_back({""});
             hologram->lines.back().content.push_back(hologram->lines.back().text);
@@ -650,24 +640,24 @@ void HologramService::refreshPlayer(Player& player, bool force) {
             continue;
         }
 
-        std::optional<std::string>                                        resolvedText;
-        std::unordered_map<std::size_t, HologramLineCallbackEntry> const* callbacks = nullptr;
+        std::optional<std::string> resolvedText;
+        std::unordered_map<std::size_t, HologramLineCallbackEntry> callbacks;
         {
             std::scoped_lock lock{mMutex};
             if (auto callbackIter = mLineCallbacks.find(hologram.name); callbackIter != mLineCallbacks.end()) {
-                callbacks = &callbackIter->second;
+                callbacks = callbackIter->second;
             }
         }
 
         auto resolvedLines = resolveBaseLines(player, hologram);
-        if (callbacks != nullptr && !callbacks->empty()) {
+        if (!callbacks.empty()) {
             bool shouldInvoke = force;
             {
                 std::scoped_lock lock{mMutex};
-                auto&            callbackCache = mLineCallbackUpdateCache[playerKey][runtimeId];
-                uint64_t         nextDue       = callbackCache;
+                auto&    callbackCache = mLineCallbackUpdateCache[playerKey][runtimeId];
+                uint64_t nextDue       = callbackCache;
                 if (!shouldInvoke) {
-                    for (auto const& [lineIndex, entry] : *callbacks) {
+                    for (auto const& [lineIndex, entry] : callbacks) {
                         if (!entry.callback) {
                             continue;
                         }
@@ -677,26 +667,27 @@ void HologramService::refreshPlayer(Player& player, bool force) {
                         }
                     }
                 }
-                if (shouldInvoke) {
-                    for (auto const& [lineIndex, entry] : *callbacks) {
-                        if (!entry.callback) {
-                            continue;
-                        }
-                        entry.callback(player, resolvedLines);
+            }
+            if (shouldInvoke) {
+                for (auto const& [lineIndex, entry] : callbacks) {
+                    if (!entry.callback) {
+                        continue;
                     }
-                    uint64_t earliestNextDue = 0;
-                    auto     currentNow      = nowMs();
-                    for (auto const& [lineIndex, entry] : *callbacks) {
-                        if (entry.updateIntervalMs == 0) {
-                            continue;
-                        }
-                        auto due = currentNow + entry.updateIntervalMs;
-                        if (earliestNextDue == 0 || due < earliestNextDue) {
-                            earliestNextDue = due;
-                        }
-                    }
-                    callbackCache = earliestNextDue;
+                    entry.callback(player, resolvedLines);
                 }
+                uint64_t earliestNextDue = 0;
+                auto     currentNow      = nowMs();
+                for (auto const& [lineIndex, entry] : callbacks) {
+                    if (entry.updateIntervalMs == 0) {
+                        continue;
+                    }
+                    auto due = currentNow + entry.updateIntervalMs;
+                    if (earliestNextDue == 0 || due < earliestNextDue) {
+                        earliestNextDue = due;
+                    }
+                }
+                std::scoped_lock lock{mMutex};
+                mLineCallbackUpdateCache[playerKey][runtimeId] = earliestNextDue;
             }
         }
 
