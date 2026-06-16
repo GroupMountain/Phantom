@@ -36,9 +36,9 @@ void replaceAll(std::string& value, std::string_view from, std::string_view to) 
 std::string logText(std::string_view key, std::initializer_list<std::pair<std::string_view, std::string>> args = {}) {
     auto text = i18n::tr(key, Phantom::getInstance().getLanguage());
     for (auto const& [name, value] : args) {
-        std::string placeholder = "{";
-        placeholder += name;
-        placeholder += "}";
+        std::string placeholder  = "{";
+        placeholder             += name;
+        placeholder             += "}";
         replaceAll(text, placeholder, value);
     }
     return text;
@@ -69,14 +69,13 @@ std::string logText(std::string_view key, std::initializer_list<std::pair<std::s
     return dx * dx + dy * dy + dz * dz <= distance * distance;
 }
 
-[[nodiscard]] sculk::protocol::Vec3 toProtocol(Vec3 const& pos) {
-    return {pos.x, pos.y, pos.z};
-}
+[[nodiscard]] sculk::protocol::Vec3 toProtocol(Vec3 const& pos) { return {pos.x, pos.y, pos.z}; }
 
 [[nodiscard]] uint64_t nowMs() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     std::chrono::steady_clock::now().time_since_epoch()
-    ).count());
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count()
+    );
 }
 
 [[nodiscard]] std::vector<std::string> contentPool(HologramLine const& line) {
@@ -94,7 +93,13 @@ std::string logText(std::string_view key, std::initializer_list<std::pair<std::s
     return static_cast<std::size_t>((nowMs() / line.updateIntervalMs) % pool.size());
 }
 
-[[nodiscard]] std::string renderVariables(std::string value, Player& player, Hologram const& hologram, std::size_t lineIndex, std::size_t contentIndex) {
+[[nodiscard]] std::string renderVariables(
+    std::string     value,
+    Player&         player,
+    Hologram const& hologram,
+    std::size_t     lineIndex,
+    std::size_t     contentIndex
+) {
     auto const pos = player.getPosition();
     replaceAll(value, "{player}", player.getRealName());
     replaceAll(value, "{dimension}", std::to_string(dimOf(player)));
@@ -115,27 +120,29 @@ std::string logText(std::string_view key, std::initializer_list<std::pair<std::s
     return value;
 }
 
-[[nodiscard]] std::pair<std::size_t, std::string> resolveLineText(Player& player, Hologram const& hologram, std::size_t lineIndex) {
-    if (lineIndex >= hologram.lines.size()) {
-        return {0, {}};
+[[nodiscard]] std::vector<std::string> resolveBaseLines(Player& player, Hologram const& hologram) {
+    std::vector<std::string> lines;
+    lines.reserve(hologram.lines.size());
+    for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
+        auto const& line  = hologram.lines[i];
+        auto const  pool  = contentPool(line);
+        auto const  index = std::min(currentContentIndex(line), pool.size() - 1);
+        auto        text  = pool[index];
+        if (line.parseVariables) {
+            text = renderVariables(std::move(text), player, hologram, i, index);
+        }
+        lines.emplace_back(std::move(text));
     }
-    auto const& line  = hologram.lines[lineIndex];
-    auto const  pool  = contentPool(line);
-    auto const  index = std::min(currentContentIndex(line), pool.size() - 1);
-    auto        text  = pool[index];
-    if (line.parseVariables) {
-        text = renderVariables(std::move(text), player, hologram, lineIndex, index);
-    }
-    return {index, std::move(text)};
+    return lines;
 }
 
-[[nodiscard]] std::string resolveHologramText(Player& player, Hologram const& hologram) {
+[[nodiscard]] std::string joinLines(std::vector<std::string> const& lines) {
     std::string text;
-    for (std::size_t i = 0; i < hologram.lines.size(); ++i) {
-        if (!text.empty()) {
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (i != 0) {
             text.push_back('\n');
         }
-        text += resolveLineText(player, hologram, i).second;
+        text += lines[i];
     }
     return text;
 }
@@ -162,11 +169,11 @@ void HologramService::init() {
     }
     reload();
     auto& eventBus = ll::event::EventBus::getInstance();
-    mListeners.emplace_back(eventBus.emplaceListener<ll::event::player::PlayerJoinEvent>(
-        [](ll::event::player::PlayerJoinEvent& event) {
+    mListeners.emplace_back(
+        eventBus.emplaceListener<ll::event::player::PlayerJoinEvent>([](ll::event::player::PlayerJoinEvent& event) {
             HologramService::getInstance().refreshPlayer(event.self(), true);
-        }
-    ));
+        })
+    );
     mListeners.emplace_back(eventBus.emplaceListener<ll::event::player::PlayerDisconnectEvent>(
         [](ll::event::player::PlayerDisconnectEvent& event) {
             HologramService::getInstance().despawnAllFor(event.self());
@@ -187,6 +194,8 @@ void HologramService::shutdown() {
     std::scoped_lock lock{mMutex};
     mVisibleShapeIds.clear();
     mLineContentCache.clear();
+    mLineCallbacks.clear();
+    mLineCallbackUpdateCache.clear();
     mInitialized = false;
 }
 
@@ -211,7 +220,7 @@ std::vector<Hologram> HologramService::list() const {
 
 std::optional<Hologram> HologramService::get(std::string const& name) const {
     std::scoped_lock lock{mMutex};
-    auto const* hologram = findUnlocked(normalizeName(name));
+    auto const*      hologram = findUnlocked(normalizeName(name));
     if (hologram == nullptr) {
         return std::nullopt;
     }
@@ -220,17 +229,15 @@ std::optional<Hologram> HologramService::get(std::string const& name) const {
 
 Hologram* HologramService::findUnlocked(std::string const& name) {
     auto const normalized = normalizeName(name);
-    auto iter = std::ranges::find_if(mStore.holograms, [&](Hologram const& hologram) {
-        return hologram.name == normalized;
-    });
+    auto       iter =
+        std::ranges::find_if(mStore.holograms, [&](Hologram const& hologram) { return hologram.name == normalized; });
     return iter == mStore.holograms.end() ? nullptr : &*iter;
 }
 
 Hologram const* HologramService::findUnlocked(std::string const& name) const {
     auto const normalized = normalizeName(name);
-    auto iter = std::ranges::find_if(mStore.holograms, [&](Hologram const& hologram) {
-        return hologram.name == normalized;
-    });
+    auto       iter =
+        std::ranges::find_if(mStore.holograms, [&](Hologram const& hologram) { return hologram.name == normalized; });
     return iter == mStore.holograms.end() ? nullptr : &*iter;
 }
 
@@ -262,13 +269,15 @@ bool HologramService::remove(std::string const& name) {
     refreshAll(true);
     {
         std::scoped_lock lock{mMutex};
-        auto iter = std::ranges::remove_if(mStore.holograms, [&](Hologram const& hologram) {
+        auto             iter = std::ranges::remove_if(mStore.holograms, [&](Hologram const& hologram) {
             return hologram.name == normalized;
         });
         if (iter.begin() == mStore.holograms.end()) {
             return false;
         }
         mStore.holograms.erase(iter.begin(), iter.end());
+        mLineCallbacks.erase(normalized);
+        mLineCallbackUpdateCache.erase(normalized);
     }
     save();
     refreshAll(true);
@@ -288,6 +297,15 @@ bool HologramService::rename(std::string const& oldName, std::string const& newN
         if (hologram == nullptr) {
             return false;
         }
+        if (auto callbackIter = mLineCallbacks.find(normalizedOld); callbackIter != mLineCallbacks.end()) {
+            mLineCallbacks[normalizedNew] = std::move(callbackIter->second);
+            mLineCallbacks.erase(callbackIter);
+        }
+        if (auto cacheIter = mLineCallbackUpdateCache.find(normalizedOld);
+            cacheIter != mLineCallbackUpdateCache.end()) {
+            mLineCallbackUpdateCache[normalizedNew] = std::move(cacheIter->second);
+            mLineCallbackUpdateCache.erase(cacheIter);
+        }
         hologram->name = normalizedNew;
     }
     save();
@@ -298,7 +316,7 @@ bool HologramService::rename(std::string const& oldName, std::string const& newN
 bool HologramService::setEnabled(std::string const& name, bool enabled) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr) {
             return false;
         }
@@ -312,7 +330,7 @@ bool HologramService::setEnabled(std::string const& name, bool enabled) {
 bool HologramService::setPosition(std::string const& name, Vec3 const& position, int dimension) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr) {
             return false;
         }
@@ -327,7 +345,7 @@ bool HologramService::setPosition(std::string const& name, Vec3 const& position,
 bool HologramService::setOptions(std::string const& name, bool enabled, double viewDistance, double lineSpacing) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr) {
             return false;
         }
@@ -344,7 +362,7 @@ bool HologramService::setLines(std::string const& name, std::vector<std::string>
     refreshAll(true);
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr) {
             return false;
         }
@@ -365,7 +383,7 @@ bool HologramService::setLines(std::string const& name, std::vector<std::string>
 bool HologramService::appendLine(std::string const& name, std::string line) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr) {
             return false;
         }
@@ -380,7 +398,7 @@ bool HologramService::appendLine(std::string const& name, std::string line) {
 bool HologramService::insertLine(std::string const& name, std::size_t index, std::string line) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr || index > hologram->lines.size()) {
             return false;
         }
@@ -396,7 +414,7 @@ bool HologramService::insertLine(std::string const& name, std::size_t index, std
 bool HologramService::setLine(std::string const& name, std::size_t index, std::string line) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr || index >= hologram->lines.size()) {
             return false;
         }
@@ -404,6 +422,16 @@ bool HologramService::setLine(std::string const& name, std::size_t index, std::s
         hologram->lines[index].content          = {hologram->lines[index].text};
         hologram->lines[index].updateIntervalMs = 0;
         hologram->lines[index].parseVariables   = false;
+        if (auto callbackIter = mLineCallbacks.find(hologram->name); callbackIter != mLineCallbacks.end()) {
+            callbackIter->second.erase(index);
+            if (callbackIter->second.empty()) {
+                mLineCallbacks.erase(callbackIter);
+            }
+        }
+        if (auto cacheIter = mLineCallbackUpdateCache.find(hologram->name);
+            cacheIter != mLineCallbackUpdateCache.end()) {
+            cacheIter->second.clear();
+        }
     }
     save();
     refreshAll(true);
@@ -419,7 +447,7 @@ bool HologramService::setLineDynamic(
 ) {
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr || index >= hologram->lines.size()) {
             return false;
         }
@@ -436,15 +464,67 @@ bool HologramService::setLineDynamic(
     return true;
 }
 
+bool HologramService::setLineCallback(
+    std::string const&       name,
+    std::size_t              index,
+    HologramLineTextCallback callback,
+    uint64_t                 updateIntervalMs
+) {
+    {
+        std::scoped_lock lock{mMutex};
+        auto*            hologram = findUnlocked(name);
+        if (hologram == nullptr || index >= hologram->lines.size()) {
+            return false;
+        }
+        if (callback) {
+            mLineCallbacks[hologram->name][index] = {
+                .callback         = std::move(callback),
+                .updateIntervalMs = updateIntervalMs,
+            };
+        } else if (auto callbackIter = mLineCallbacks.find(hologram->name); callbackIter != mLineCallbacks.end()) {
+            callbackIter->second.erase(index);
+            if (callbackIter->second.empty()) {
+                mLineCallbacks.erase(callbackIter);
+            }
+        }
+        mLineCallbackUpdateCache[hologram->name].clear();
+    }
+    refreshAll(true);
+    return true;
+}
+
+bool HologramService::clearLineCallback(std::string const& name, std::size_t index) {
+    return setLineCallback(name, index, {});
+}
+
 bool HologramService::removeLine(std::string const& name, std::size_t index) {
     refreshAll(true);
     {
         std::scoped_lock lock{mMutex};
-        auto* hologram = findUnlocked(name);
+        auto*            hologram = findUnlocked(name);
         if (hologram == nullptr || index >= hologram->lines.size()) {
             return false;
         }
         hologram->lines.erase(hologram->lines.begin() + static_cast<std::ptrdiff_t>(index));
+        if (auto callbackIter = mLineCallbacks.find(hologram->name); callbackIter != mLineCallbacks.end()) {
+            std::unordered_map<std::size_t, HologramLineCallbackEntry> nextCallbacks;
+            for (auto& [lineIndex, callback] : callbackIter->second) {
+                if (lineIndex < index) {
+                    nextCallbacks.emplace(lineIndex, std::move(callback));
+                } else if (lineIndex > index) {
+                    nextCallbacks.emplace(lineIndex - 1, std::move(callback));
+                }
+            }
+            if (nextCallbacks.empty()) {
+                mLineCallbacks.erase(callbackIter);
+            } else {
+                callbackIter->second = std::move(nextCallbacks);
+            }
+        }
+        if (auto cacheIter = mLineCallbackUpdateCache.find(hologram->name);
+            cacheIter != mLineCallbackUpdateCache.end()) {
+            cacheIter->second.clear();
+        }
         if (hologram->lines.empty()) {
             hologram->lines.push_back({""});
             hologram->lines.back().content.push_back(hologram->lines.back().text);
@@ -456,8 +536,8 @@ bool HologramService::removeLine(std::string const& name, std::size_t index) {
 }
 
 bool HologramService::moveNearPlayer(std::string const& name, Player const& player) {
-    auto pos = player.getPosition();
-    pos.y += 2.2f;
+    auto pos  = player.getPosition();
+    pos.y    += 2.2f;
     return setPosition(name, pos, dimOf(player));
 }
 
@@ -466,7 +546,15 @@ bool HologramService::reload() {
     HologramStore next;
     auto const    path = storePath();
     if (!ll::config::loadConfig(next, path)) {
-        logger().warn("{}", logText("phantom.log.store_missing", {{"path", path.string()}}));
+        logger().warn(
+            "{}",
+            logText(
+                "phantom.log.store_missing",
+                {
+                    {"path", path.string()}
+        }
+            )
+        );
         ll::config::saveConfig(next, path);
     }
     for (auto& hologram : next.holograms) {
@@ -521,7 +609,7 @@ void HologramService::removeHologramFromClient(Player& player, Hologram const& h
 }
 
 void HologramService::refreshPlayer(Player& player, bool force) {
-    std::vector<Hologram> snapshot = list();
+    std::vector<Hologram> snapshot  = list();
     auto const            playerKey = uuidOf(player);
 
     std::unordered_set<std::uint64_t> expected;
@@ -562,23 +650,85 @@ void HologramService::refreshPlayer(Player& player, bool force) {
             continue;
         }
 
-        auto resolvedText = resolveHologramText(player, hologram);
-        if (!previous.contains(runtimeId)) {
-            sendHologram(player, hologram, resolvedText);
+        std::optional<std::string>                                        resolvedText;
+        std::unordered_map<std::size_t, HologramLineCallbackEntry> const* callbacks = nullptr;
+        {
             std::scoped_lock lock{mMutex};
-            mLineContentCache[playerKey][runtimeId] = std::move(resolvedText);
+            if (auto callbackIter = mLineCallbacks.find(hologram.name); callbackIter != mLineCallbacks.end()) {
+                callbacks = &callbackIter->second;
+            }
+        }
+
+        auto resolvedLines = resolveBaseLines(player, hologram);
+        if (callbacks != nullptr && !callbacks->empty()) {
+            bool shouldInvoke = force;
+            {
+                std::scoped_lock lock{mMutex};
+                auto&            callbackCache = mLineCallbackUpdateCache[playerKey][runtimeId];
+                uint64_t         nextDue       = callbackCache;
+                if (!shouldInvoke) {
+                    for (auto const& [lineIndex, entry] : *callbacks) {
+                        if (!entry.callback) {
+                            continue;
+                        }
+                        if (entry.updateIntervalMs == 0 || nextDue == 0 || nowMs() >= nextDue) {
+                            shouldInvoke = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldInvoke) {
+                    for (auto const& [lineIndex, entry] : *callbacks) {
+                        if (!entry.callback) {
+                            continue;
+                        }
+                        entry.callback(player, resolvedLines);
+                    }
+                    uint64_t earliestNextDue = 0;
+                    auto     currentNow      = nowMs();
+                    for (auto const& [lineIndex, entry] : *callbacks) {
+                        if (entry.updateIntervalMs == 0) {
+                            continue;
+                        }
+                        auto due = currentNow + entry.updateIntervalMs;
+                        if (earliestNextDue == 0 || due < earliestNextDue) {
+                            earliestNextDue = due;
+                        }
+                    }
+                    callbackCache = earliestNextDue;
+                }
+            }
+        }
+
+        if (!resolvedLines.empty()) {
+            resolvedText = joinLines(resolvedLines);
+        }
+
+        if (!resolvedText) {
+            if (previous.contains(runtimeId)) {
+                removeHologramFromClient(player, hologram);
+                std::scoped_lock lock{mMutex};
+                mLineContentCache[playerKey].erase(runtimeId);
+            }
+            continue;
+        }
+
+        if (!previous.contains(runtimeId)) {
+            sendHologram(player, hologram, *resolvedText);
+            std::scoped_lock lock{mMutex};
+            mLineContentCache[playerKey][runtimeId] = std::move(*resolvedText);
         } else {
             bool shouldUpdate = force;
             {
                 std::scoped_lock lock{mMutex};
-                auto& cache = mLineContentCache[playerKey][runtimeId];
-                if (cache != resolvedText) {
+                auto&            cache = mLineContentCache[playerKey][runtimeId];
+                if (cache != *resolvedText) {
                     shouldUpdate = true;
-                    cache        = resolvedText;
+                    cache        = *resolvedText;
                 }
             }
             if (shouldUpdate) {
-                sendHologram(player, hologram, resolvedText);
+                sendHologram(player, hologram, *resolvedText);
             }
         }
     }
@@ -595,6 +745,7 @@ void HologramService::despawnAllFor(Player& player) {
         std::scoped_lock lock{mMutex};
         mVisibleShapeIds.erase(playerKey);
         mLineContentCache.erase(playerKey);
+        mLineCallbackUpdateCache.erase(playerKey);
     }
 }
 

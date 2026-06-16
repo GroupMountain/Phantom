@@ -32,9 +32,9 @@ inline void replaceAll(std::string& value, std::string_view from, std::string_vi
 inline std::string logText(std::string_view key, std::initializer_list<std::pair<std::string_view, std::string>> args) {
     auto text = i18n::tr(key, Phantom::getInstance().getLanguage());
     for (auto const& [name, value] : args) {
-        std::string placeholder = "{";
-        placeholder += name;
-        placeholder += "}";
+        std::string placeholder  = "{";
+        placeholder             += name;
+        placeholder             += "}";
         replaceAll(text, placeholder, value);
     }
     return text;
@@ -43,7 +43,12 @@ inline std::string logText(std::string_view key, std::initializer_list<std::pair
 } // namespace detail
 
 template <typename PacketT>
-bool sendSculkPacketTo(NetworkIdentifier const& networkId, SubClientId subId, PacketT const& packet, ll::io::Logger& logger) {
+bool sendSculkPacketTo(
+    NetworkIdentifier const& networkId,
+    SubClientId              subId,
+    PacketT const&           packet,
+    ll::io::Logger&          logger
+) {
     std::vector<std::byte>        bodyBuffer;
     sculk::protocol::BinaryStream bodyStream(bodyBuffer);
     packet.write(bodyStream);
@@ -52,10 +57,16 @@ bool sendSculkPacketTo(NetworkIdentifier const& networkId, SubClientId subId, Pa
     ReadOnlyBinaryStream checkStream(checkBuffer, true);
     auto                 checkPacket = MinecraftPackets::createPacket(static_cast<MinecraftPacketIds>(packet.getId()));
     if (!checkPacket || !checkPacket->read(checkStream)) {
-        logger.warn("{}", detail::logText(
-            "phantom.log.packet_validation_failed",
-            {{"packet", std::string{packet.getName()}}, {"id", std::to_string(static_cast<int>(packet.getId()))}}
-        ));
+        logger.warn(
+            "{}",
+            detail::logText(
+                "phantom.log.packet_validation_failed",
+                {
+                    {"packet", std::string{packet.getName()}                   },
+                    {"id",     std::to_string(static_cast<int>(packet.getId()))}
+        }
+            )
+        );
         return false;
     }
 

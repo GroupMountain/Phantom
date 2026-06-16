@@ -7,13 +7,13 @@ namespace phantom {
 class Phantom {
 public:
     struct ModuleConfig {
-        int    version{1};
-        bool   holograms{true};
-        bool   forms{true};
-        double viewDistance{48.0};
-        double lineSpacing{0.27};
-        int    refreshIntervalTicks{10};
-        int    dynamicRefreshIntervalTicks{10};
+        int         version{1};
+        bool        holograms{true};
+        bool        forms{true};
+        double      viewDistance{48.0};
+        double      lineSpacing{0.27};
+        int         refreshIntervalTicks{10};
+        int         dynamicRefreshIntervalTicks{10};
         std::string language{"auto"};
     };
 
@@ -23,7 +23,7 @@ public:
 
     [[nodiscard]] ll::mod::NativeMod& getSelf() const { return mSelf; }
     [[nodiscard]] ModuleConfig const& getConfig() const { return mConfig; }
-    [[nodiscard]] std::string const& getLanguage() const { return mLanguage; }
+    [[nodiscard]] std::string const&  getLanguage() const { return mLanguage; }
 
     bool load();
     bool enable();

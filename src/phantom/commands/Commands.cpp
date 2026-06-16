@@ -106,16 +106,15 @@ void replaceAll(std::string& value, std::string_view from, std::string_view to) 
     }
 }
 
-[[nodiscard]] std::string trf(
-    CommandOrigin const& origin,
-    std::string_view     key,
-    std::initializer_list<std::pair<std::string_view, std::string>> args
-) {
+[[nodiscard]] std::string
+trf(CommandOrigin const&                                            origin,
+    std::string_view                                                key,
+    std::initializer_list<std::pair<std::string_view, std::string>> args) {
     auto text = tr(origin, key);
     for (auto const& [name, value] : args) {
-        std::string placeholder = "{";
-        placeholder += name;
-        placeholder += "}";
+        std::string placeholder  = "{";
+        placeholder             += name;
+        placeholder             += "}";
         replaceAll(text, placeholder, value);
     }
     return text;
@@ -128,11 +127,16 @@ void listHolograms(CommandOrigin const& origin, CommandOutput& output) {
         return;
     }
     std::stringstream stream;
-    stream << trf(origin, "phantom.command.list_header", {{"count", std::to_string(holograms.size())}});
+    stream << trf(
+        origin,
+        "phantom.command.list_header",
+        {
+            {"count", std::to_string(holograms.size())}
+    }
+    );
     for (auto const& hologram : holograms) {
         stream << '\n'
-               << trf(
-                      origin,
+               << trf(origin,
                       "phantom.command.list_item",
                       {
                           {"name", hologram.name},
@@ -143,8 +147,7 @@ void listHolograms(CommandOrigin const& origin, CommandOutput& output) {
                           {"x", std::to_string(hologram.position.x)},
                           {"y", std::to_string(hologram.position.y)},
                           {"z", std::to_string(hologram.position.z)},
-                      }
-                  );
+        });
     }
     output.success(stream.str());
 }
@@ -210,7 +213,13 @@ void handleNamed(CommandOrigin const& origin, CommandOutput& output, PhantomActi
     }
 }
 
-void handleText(CommandOrigin const& origin, CommandOutput& output, PhantomAction action, std::string const& name, std::string const& text) {
+void handleText(
+    CommandOrigin const& origin,
+    CommandOutput&       output,
+    PhantomAction        action,
+    std::string const&   name,
+    std::string const&   text
+) {
     auto& service = hologram::HologramService::getInstance();
     bool  ok      = false;
     switch (action) {
@@ -220,8 +229,8 @@ void handleText(CommandOrigin const& origin, CommandOutput& output, PhantomActio
             output.error(tr(origin, "phantom.command.player_only"));
             return;
         }
-        auto pos = player->getPosition();
-        pos.y += 2.2f;
+        auto pos  = player->getPosition();
+        pos.y    += 2.2f;
         hologram::Hologram hologram;
         hologram.name      = name;
         hologram.position  = pos;
@@ -241,7 +250,13 @@ void handleText(CommandOrigin const& origin, CommandOutput& output, PhantomActio
     }
 }
 
-void handleLine(CommandOrigin const& origin, CommandOutput& output, PhantomAction action, std::string const& name, int index) {
+void handleLine(
+    CommandOrigin const& origin,
+    CommandOutput&       output,
+    PhantomAction        action,
+    std::string const&   name,
+    int                  index
+) {
     if (index < 1) {
         output.error(tr(origin, "phantom.command.line_index_starts_at_one"));
         return;
@@ -254,7 +269,13 @@ void handleLine(CommandOrigin const& origin, CommandOutput& output, PhantomActio
     output.success(ok ? tr(origin, "phantom.command.updated") : tr(origin, "phantom.command.not_found"));
 }
 
-void handleSetLine(CommandOrigin const& origin, CommandOutput& output, std::string const& name, int index, std::string const& text) {
+void handleSetLine(
+    CommandOrigin const& origin,
+    CommandOutput&       output,
+    std::string const&   name,
+    int                  index,
+    std::string const&   text
+) {
     if (index < 1) {
         output.error(tr(origin, "phantom.command.line_index_starts_at_one"));
         return;
@@ -280,12 +301,12 @@ std::vector<std::string> splitVariants(std::string const& text) {
 
 void handleDynamicLine(
     CommandOrigin const& origin,
-    CommandOutput&      output,
-    std::string const&  name,
-    int                 index,
-    int                 intervalMs,
-    int                 parseVariables,
-    std::string const&  text
+    CommandOutput&       output,
+    std::string const&   name,
+    int                  index,
+    int                  intervalMs,
+    int                  parseVariables,
+    std::string const&   text
 ) {
     if (index < 1) {
         output.error(tr(origin, "phantom.command.line_index_starts_at_one"));
@@ -304,12 +325,11 @@ void handleDynamicLine(
 } // namespace
 
 void registerCommands() {
-    auto& command = ll::command::CommandRegistrar::getServerInstance()
-                        .getOrCreateCommand(
-                            "phantom",
-                            i18n::tr("phantom.command.description", Phantom::getInstance().getLanguage()),
-                            CommandPermissionLevel::GameDirectors
-                        );
+    auto& command = ll::command::CommandRegistrar::getServerInstance().getOrCreateCommand(
+        "phantom",
+        i18n::tr("phantom.command.description", Phantom::getInstance().getLanguage()),
+        CommandPermissionLevel::GameDirectors
+    );
 
     command.alias("hologram");
     command.alias("holo");
@@ -337,11 +357,14 @@ void registerCommands() {
             handleLine(origin, output, param.action, param.name, param.index);
         }
     );
-    command.overload<SetLineActionParam>().required("action").required("name").required("index").required("text").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, SetLineActionParam const& param) {
+    command.overload<SetLineActionParam>()
+        .required("action")
+        .required("name")
+        .required("index")
+        .required("text")
+        .execute([](CommandOrigin const& origin, CommandOutput& output, SetLineActionParam const& param) {
             handleSetLine(origin, output, param.name, param.index, param.text);
-        }
-    );
+        });
     command.overload<DynamicLineActionParam>()
         .required("action")
         .required("name")

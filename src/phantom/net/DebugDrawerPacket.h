@@ -17,7 +17,7 @@ namespace phantom::net {
 class DebugDrawerPacket {
 public:
     struct Shape {
-        std::uint64_t                         networkId{};
+        std::uint64_t                        networkId{};
         std::optional<sculk::protocol::Vec3> location{};
         std::optional<std::int32_t>          dimensionId{};
         std::string                          text{};
@@ -51,9 +51,12 @@ private:
             std::optional<float>                                timeLeftTotalSec;
             std::optional<std::int64_t>                         attachedToId;
 
-            stream.writeOptional(type, [](sculk::protocol::BinaryStream& out, sculk::protocol::PrimitiveShapesType value) {
-                out.writeEnum(value, &sculk::protocol::BinaryStream::writeByte);
-            });
+            stream.writeOptional(
+                type,
+                [](sculk::protocol::BinaryStream& out, sculk::protocol::PrimitiveShapesType value) {
+                    out.writeEnum(value, &sculk::protocol::BinaryStream::writeByte);
+                }
+            );
             stream.writeOptional(location, &sculk::protocol::Vec3::write);
             stream.writeOptional(rotation, &sculk::protocol::Vec3::write);
             stream.writeOptional(scale, &sculk::protocol::BinaryStream::writeFloat);

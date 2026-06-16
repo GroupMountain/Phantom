@@ -7,10 +7,14 @@
 namespace phantom::hologram {
 
 std::string normalizeName(std::string value) {
-    value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char ch) {
-                    return !std::isalnum(ch) && ch != '_' && ch != '-';
-                }),
-                value.end());
+    value.erase(
+        std::remove_if(
+            value.begin(),
+            value.end(),
+            [](unsigned char ch) { return !std::isalnum(ch) && ch != '_' && ch != '-'; }
+        ),
+        value.end()
+    );
     if (value.empty()) {
         value = "hologram";
     }

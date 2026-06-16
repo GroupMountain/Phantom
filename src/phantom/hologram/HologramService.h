@@ -7,6 +7,7 @@
 #include "mc/world/actor/player/Player.h"
 
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -16,6 +17,13 @@
 
 namespace phantom::hologram {
 
+using HologramLineTextCallback = std::function<void(Player& player, std::vector<std::string>& currentLines)>;
+
+struct HologramLineCallbackEntry {
+    HologramLineTextCallback callback;
+    uint64_t                 updateIntervalMs{0};
+};
+
 class HologramService {
 public:
     static HologramService& getInstance();
@@ -24,7 +32,7 @@ public:
     void shutdown();
     void tick();
 
-    [[nodiscard]] std::vector<Hologram> list() const;
+    [[nodiscard]] std::vector<Hologram>   list() const;
     [[nodiscard]] std::optional<Hologram> get(std::string const& name) const;
 
     bool create(Hologram hologram);
@@ -41,6 +49,13 @@ public:
         uint64_t                 updateIntervalMs,
         bool                     parseVariables
     );
+    bool setLineCallback(
+        std::string const&       name,
+        std::size_t              index,
+        HologramLineTextCallback callback,
+        uint64_t                 updateIntervalMs = 0
+    );
+    bool clearLineCallback(std::string const& name, std::size_t index);
     bool appendLine(std::string const& name, std::string line);
     bool insertLine(std::string const& name, std::size_t index, std::string line);
     bool setLine(std::string const& name, std::size_t index, std::string line);
@@ -57,8 +72,8 @@ private:
     HologramService() = default;
 
     [[nodiscard]] std::filesystem::path storePath() const;
-    [[nodiscard]] Hologram* findUnlocked(std::string const& name);
-    [[nodiscard]] Hologram const* findUnlocked(std::string const& name) const;
+    [[nodiscard]] Hologram*             findUnlocked(std::string const& name);
+    [[nodiscard]] Hologram const*       findUnlocked(std::string const& name) const;
 
     void sendHologram(Player& player, Hologram const& hologram, std::string const& text);
     void removeHologramFromClient(Player& player, Hologram const& hologram);
@@ -68,9 +83,11 @@ private:
     bool               mInitialized{false};
     int                mTickCounter{0};
 
-    std::unordered_map<std::string, std::unordered_set<std::uint64_t>> mVisibleShapeIds;
-    std::unordered_map<std::string, std::unordered_map<std::uint64_t, std::string>> mLineContentCache;
-    std::vector<ll::event::ListenerPtr>                               mListeners;
+    std::unordered_map<std::string, std::unordered_set<std::uint64_t>>                          mVisibleShapeIds;
+    std::unordered_map<std::string, std::unordered_map<std::uint64_t, std::string>>             mLineContentCache;
+    std::unordered_map<std::string, std::unordered_map<std::size_t, HologramLineCallbackEntry>> mLineCallbacks;
+    std::unordered_map<std::string, std::unordered_map<std::uint64_t, uint64_t>> mLineCallbackUpdateCache;
+    std::vector<ll::event::ListenerPtr>                                          mListeners;
 };
 
 } // namespace phantom::hologram

@@ -253,8 +253,8 @@ bool ensureFile(std::filesystem::path const& path, std::string_view content) {
 
 bool setup(std::filesystem::path const& langDir) {
     auto ok = true;
-    ok = ensureFile(langDir / "en_US.json", kEnUs) && ok;
-    ok = ensureFile(langDir / "zh_CN.json", kZhCn) && ok;
+    ok      = ensureFile(langDir / "en_US.json", kEnUs) && ok;
+    ok      = ensureFile(langDir / "zh_CN.json", kZhCn) && ok;
 
     auto result = ll::i18n::getInstance().load(langDir);
     return ok && static_cast<bool>(result);
@@ -267,9 +267,7 @@ std::string normalizeLocale(std::string_view localeCode) {
     return "en_US";
 }
 
-std::string detectLeviLaminaLocale() {
-    return normalizeLocale(ll::i18n::getDefaultLocaleCode());
-}
+std::string detectLeviLaminaLocale() { return normalizeLocale(ll::i18n::getDefaultLocaleCode()); }
 
 std::string tr(std::string_view key, std::string_view localeCode) {
     auto& i18n  = ll::i18n::getInstance();

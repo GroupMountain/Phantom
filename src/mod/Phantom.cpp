@@ -3,6 +3,7 @@
 #include "phantom/commands/Commands.h"
 #include "phantom/hologram/HologramService.h"
 #include "phantom/i18n/I18n.h"
+#include "phantom/service/PhantomServiceRegistrar.h"
 
 #include "ll/api/Config.h"
 #include "ll/api/mod/RegisterHelper.h"
@@ -21,9 +22,9 @@ void replaceAll(std::string& value, std::string_view from, std::string_view to) 
 std::string logText(std::string_view key, std::initializer_list<std::pair<std::string_view, std::string>> args = {}) {
     auto text = i18n::tr(key, Phantom::getInstance().getLanguage());
     for (auto const& [name, value] : args) {
-        std::string placeholder = "{";
-        placeholder += name;
-        placeholder += "}";
+        std::string placeholder  = "{";
+        placeholder             += name;
+        placeholder             += "}";
         replaceAll(text, placeholder, value);
     }
     return text;
@@ -47,7 +48,15 @@ bool Phantom::loadConfig() {
     mLanguage = mConfig.language;
 
     if (!loaded) {
-        getSelf().getLogger().warn("{}", logText("phantom.log.config_missing", {{"path", configPath.string()}}));
+        getSelf().getLogger().warn(
+            "{}",
+            logText(
+                "phantom.log.config_missing",
+                {
+                    {"path", configPath.string()}
+        }
+            )
+        );
         ll::config::saveConfig(mConfig, configPath);
         return false;
     }
@@ -69,12 +78,14 @@ bool Phantom::enable() {
     if (mConfig.holograms) {
         hologram::HologramService::getInstance().init();
     }
+    service::registerServices();
     commands::registerCommands();
     return true;
 }
 
 bool Phantom::disable() {
     getSelf().getLogger().debug("{}", logText("phantom.log.disabling"));
+    service::unregisterServices();
     hologram::HologramService::getInstance().shutdown();
     return true;
 }
