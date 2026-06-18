@@ -12,6 +12,8 @@
 #include "ll/api/memory/Hook.h"
 #include "ll/api/service/Bedrock.h"
 
+#include "mc/network/ServerNetworkHandler.h"
+#include "mc/network/packet/SetLocalPlayerAsInitializedPacket.h"
 #include "mc/world/level/Level.h"
 
 #include <algorithm>
@@ -152,6 +154,19 @@ LL_AUTO_TYPE_INSTANCE_HOOK(PhantomLevelTickHook, ll::memory::HookPriority::Norma
     HologramService::getInstance().tick();
 }
 
+LL_AUTO_TYPE_INSTANCE_HOOK(
+    PhantomInitFlushHook,
+    ll::memory::HookPriority::Normal,
+    ServerNetworkHandler,
+    &ServerNetworkHandler::$handle,
+    void,
+    NetworkIdentifier const&                 source,
+    SetLocalPlayerAsInitializedPacket const& packet
+) {
+    origin(source, packet);
+    HologramService::getInstance().markPlayerInitialized(source);
+}
+
 } // namespace
 
 HologramService& HologramService::getInstance() {
@@ -174,6 +189,7 @@ void HologramService::init() {
             HologramService::getInstance().refreshPlayer(event.self(), true);
         })
     );
+    PhantomInitFlushHook::hook();
     mListeners.emplace_back(eventBus.emplaceListener<ll::event::player::PlayerDisconnectEvent>(
         [](ll::event::player::PlayerDisconnectEvent& event) {
             HologramService::getInstance().despawnAllFor(event.self());
@@ -191,11 +207,14 @@ void HologramService::shutdown() {
         }
     }
     mListeners.clear();
+    PhantomInitFlushHook::unhook();
     std::scoped_lock lock{mMutex};
     mVisibleShapeIds.clear();
     mLineContentCache.clear();
     mLineCallbacks.clear();
     mLineCallbackUpdateCache.clear();
+    mPendingPackets.clear();
+    mInitializedPlayers.clear();
     mInitialized = false;
 }
 
@@ -324,6 +343,7 @@ bool HologramService::setEnabled(std::string const& name, bool enabled) {
 }
 
 bool HologramService::setPosition(std::string const& name, Vec3 const& position, int dimension) {
+    std::optional<Hologram> snapshot;
     {
         std::scoped_lock lock{mMutex};
         auto*            hologram = findUnlocked(name);
@@ -332,9 +352,12 @@ bool HologramService::setPosition(std::string const& name, Vec3 const& position,
         }
         hologram->position  = position;
         hologram->dimension = dimension;
+        snapshot            = *hologram;
     }
     save();
-    refreshAll(true);
+    if (snapshot.has_value()) {
+        refreshHologram(*snapshot, true);
+    }
     return true;
 }
 
@@ -463,6 +486,7 @@ bool HologramService::setLineCallback(
     HologramLineTextCallback callback,
     uint64_t                 updateIntervalMs
 ) {
+    std::optional<Hologram> snapshot;
     {
         std::scoped_lock lock{mMutex};
         auto*            hologram = findUnlocked(name);
@@ -481,8 +505,11 @@ bool HologramService::setLineCallback(
             }
         }
         mLineCallbackUpdateCache.clear();
+        snapshot = *hologram;
     }
-    refreshAll(true);
+    if (snapshot.has_value()) {
+        refreshHologram(*snapshot, true);
+    }
     return true;
 }
 
@@ -576,26 +603,83 @@ bool HologramService::save() {
     return ll::config::saveConfig(snapshot, storePath());
 }
 
+void HologramService::queuePendingShape(Player& player, net::DebugDrawerPacket::Shape shape) {
+    std::scoped_lock lock{mMutex};
+    mPendingPackets[uuidOf(player)][shape.networkId] = PendingHologramPacket{.shape = std::move(shape)};
+}
+
 void HologramService::sendHologram(Player& player, Hologram const& hologram, std::string const& text) {
-    net::DebugDrawerPacket packet;
-    packet.shapes.push_back({
+    net::DebugDrawerPacket::Shape shape{
         .networkId   = runtimeIdFor(hologram.name, 0),
         .location    = toProtocol(hologram.position),
         .dimensionId = hologram.dimension,
         .text        = text,
         .remove      = false,
-    });
+    };
+    if (!isPlayerInitialized(player)) {
+        queuePendingShape(player, std::move(shape));
+        return;
+    }
+    net::DebugDrawerPacket packet;
+    packet.shapes.push_back(std::move(shape));
     net::sendSculkPacketTo(player, packet, logger());
 }
 
 void HologramService::removeHologramFromClient(Player& player, Hologram const& hologram) {
-    net::DebugDrawerPacket packet;
-    packet.shapes.push_back({
+    net::DebugDrawerPacket::Shape shape{
         .networkId   = runtimeIdFor(hologram.name, 0),
         .dimensionId = hologram.dimension,
         .remove      = true,
-    });
+    };
+    if (!isPlayerInitialized(player)) {
+        queuePendingShape(player, std::move(shape));
+        return;
+    }
+    net::DebugDrawerPacket packet;
+    packet.shapes.push_back(std::move(shape));
     net::sendSculkPacketTo(player, packet, logger());
+}
+
+void HologramService::flushPendingPackets(Player& player) {
+    std::vector<net::DebugDrawerPacket::Shape> shapes;
+    {
+        std::scoped_lock lock{mMutex};
+        auto iter = mPendingPackets.find(uuidOf(player));
+        if (iter == mPendingPackets.end()) {
+            return;
+        }
+        shapes.reserve(iter->second.size());
+        for (auto& [runtimeId, pending] : iter->second) {
+            shapes.push_back(std::move(pending.shape));
+        }
+        mPendingPackets.erase(iter);
+    }
+    if (shapes.empty()) {
+        return;
+    }
+    net::DebugDrawerPacket packet;
+    packet.shapes = std::move(shapes);
+    net::sendSculkPacketTo(player, packet, logger());
+}
+
+void HologramService::markPlayerInitialized(NetworkIdentifier const& networkId) {
+    auto handler = ll::service::getServerNetworkHandler();
+    auto* player = handler ? handler->_getServerPlayer(networkId, SubClientId::PrimaryClient) : nullptr;
+    if (player == nullptr) {
+        return;
+    }
+    {
+        std::scoped_lock lock{mMutex};
+        mInitializedPlayers.insert(uuidOf(*player));
+    }
+    flushPendingPackets(*player);
+    refreshPlayer(*player, true);
+}
+
+bool HologramService::isPlayerInitialized(Player const& player) const {
+    auto const playerKey = uuidOf(player);
+    std::scoped_lock lock{mMutex};
+    return mInitializedPlayers.contains(playerKey);
 }
 
 void HologramService::refreshPlayer(Player& player, bool force) {
@@ -651,17 +735,17 @@ void HologramService::refreshPlayer(Player& player, bool force) {
 
         auto resolvedLines = resolveBaseLines(player, hologram);
         if (!callbacks.empty()) {
-            bool shouldInvoke = force;
+            bool shouldInvoke = force || !previous.contains(runtimeId);
             {
                 std::scoped_lock lock{mMutex};
-                auto&    callbackCache = mLineCallbackUpdateCache[playerKey][runtimeId];
-                uint64_t nextDue       = callbackCache;
+                auto&            callbackCache = mLineCallbackUpdateCache[playerKey][runtimeId];
+                uint64_t         nextDue       = callbackCache;
                 if (!shouldInvoke) {
                     for (auto const& [lineIndex, entry] : callbacks) {
-                        if (!entry.callback) {
+                        if (!entry.callback || entry.updateIntervalMs == 0) {
                             continue;
                         }
-                        if (entry.updateIntervalMs == 0 || nextDue == 0 || nowMs() >= nextDue) {
+                        if (nextDue == 0 || nowMs() >= nextDue) {
                             shouldInvoke = true;
                             break;
                         }
@@ -730,6 +814,114 @@ void HologramService::refreshPlayer(Player& player, bool force) {
     }
 }
 
+void HologramService::refreshHologram(Hologram const& hologram, bool force) {
+    auto level = ll::service::getLevel();
+    if (!level) {
+        return;
+    }
+
+    auto const runtimeId = runtimeIdFor(hologram.name, 0);
+    level->forEachPlayer([&](Player& player) {
+        auto const playerKey = uuidOf(player);
+        auto const visible   = nearEnough(player, hologram);
+
+        bool wasVisible = false;
+        {
+            std::scoped_lock lock{mMutex};
+            if (auto visibleIter = mVisibleShapeIds.find(playerKey); visibleIter != mVisibleShapeIds.end()) {
+                wasVisible = visibleIter->second.contains(runtimeId);
+            }
+        }
+
+        if (!visible) {
+            if (wasVisible) {
+                removeHologramFromClient(player, hologram);
+                std::scoped_lock lock{mMutex};
+                if (auto visibleIter = mVisibleShapeIds.find(playerKey); visibleIter != mVisibleShapeIds.end()) {
+                    visibleIter->second.erase(runtimeId);
+                }
+                mLineContentCache[playerKey].erase(runtimeId);
+            }
+            return true;
+        }
+
+        std::optional<std::string> resolvedText;
+        std::unordered_map<std::size_t, HologramLineCallbackEntry> callbacks;
+        {
+            std::scoped_lock lock{mMutex};
+            if (auto callbackIter = mLineCallbacks.find(hologram.name); callbackIter != mLineCallbacks.end()) {
+                callbacks = callbackIter->second;
+            }
+        }
+
+        auto resolvedLines = resolveBaseLines(player, hologram);
+        if (!callbacks.empty()) {
+            bool shouldInvoke = force || !wasVisible;
+            {
+                std::scoped_lock lock{mMutex};
+                auto&            callbackCache = mLineCallbackUpdateCache[playerKey][runtimeId];
+                auto const       nextDue       = callbackCache;
+                if (!shouldInvoke) {
+                    for (auto const& [lineIndex, entry] : callbacks) {
+                        if (!entry.callback || entry.updateIntervalMs == 0) {
+                            continue;
+                        }
+                        if (nextDue == 0 || nowMs() >= nextDue) {
+                            shouldInvoke = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (shouldInvoke) {
+                for (auto const& [lineIndex, entry] : callbacks) {
+                    if (!entry.callback) {
+                        continue;
+                    }
+                    entry.callback(player, resolvedLines);
+                }
+                uint64_t earliestNextDue = 0;
+                auto     currentNow      = nowMs();
+                for (auto const& [lineIndex, entry] : callbacks) {
+                    if (entry.updateIntervalMs == 0) {
+                        continue;
+                    }
+                    auto due = currentNow + entry.updateIntervalMs;
+                    if (earliestNextDue == 0 || due < earliestNextDue) {
+                        earliestNextDue = due;
+                    }
+                }
+                std::scoped_lock lock{mMutex};
+                mLineCallbackUpdateCache[playerKey][runtimeId] = earliestNextDue;
+            }
+        }
+
+        if (!resolvedLines.empty()) {
+            resolvedText = joinLines(resolvedLines);
+        }
+
+        if (!resolvedText) {
+            if (wasVisible) {
+                removeHologramFromClient(player, hologram);
+                std::scoped_lock lock{mMutex};
+                if (auto visibleIter = mVisibleShapeIds.find(playerKey); visibleIter != mVisibleShapeIds.end()) {
+                    visibleIter->second.erase(runtimeId);
+                }
+                mLineContentCache[playerKey].erase(runtimeId);
+            }
+            return true;
+        }
+
+        sendHologram(player, hologram, *resolvedText);
+        {
+            std::scoped_lock lock{mMutex};
+            mVisibleShapeIds[playerKey].insert(runtimeId);
+            mLineContentCache[playerKey][runtimeId] = *resolvedText;
+        }
+        return true;
+    });
+}
+
 void HologramService::despawnAllFor(Player& player) {
     auto const playerKey = uuidOf(player);
     {
@@ -737,6 +929,8 @@ void HologramService::despawnAllFor(Player& player) {
         mVisibleShapeIds.erase(playerKey);
         mLineContentCache.erase(playerKey);
         mLineCallbackUpdateCache.erase(playerKey);
+        mPendingPackets.erase(playerKey);
+        mInitializedPlayers.erase(playerKey);
     }
 }
 

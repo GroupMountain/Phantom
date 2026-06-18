@@ -1,9 +1,11 @@
 #pragma once
 
 #include "phantom/hologram/HologramTypes.h"
+#include "phantom/net/DebugDrawerPacket.h"
 
 #include "ll/api/event/ListenerBase.h"
 
+#include "mc/network/NetworkIdentifier.h"
 #include "mc/world/actor/player/Player.h"
 
 #include <filesystem>
@@ -22,6 +24,10 @@ using HologramLineTextCallback = std::function<void(Player& player, std::vector<
 struct HologramLineCallbackEntry {
     HologramLineTextCallback callback;
     uint64_t                 updateIntervalMs{0};
+};
+
+struct PendingHologramPacket {
+    net::DebugDrawerPacket::Shape shape;
 };
 
 class HologramService {
@@ -65,7 +71,11 @@ public:
     bool save();
 
     void refreshPlayer(Player& player, bool force = false);
+    void refreshHologram(Hologram const& hologram, bool force = false);
     void despawnAllFor(Player& player);
+    void markPlayerInitialized(NetworkIdentifier const& networkId);
+    [[nodiscard]] bool isPlayerInitialized(Player const& player) const;
+    void flushPendingPackets(Player& player);
     void refreshAll(bool force = false);
 
 private:
@@ -77,6 +87,7 @@ private:
 
     void sendHologram(Player& player, Hologram const& hologram, std::string const& text);
     void removeHologramFromClient(Player& player, Hologram const& hologram);
+    void queuePendingShape(Player& player, net::DebugDrawerPacket::Shape shape);
 
     mutable std::mutex mMutex;
     HologramStore      mStore{};
@@ -86,8 +97,10 @@ private:
     std::unordered_map<std::string, std::unordered_set<std::uint64_t>>                          mVisibleShapeIds;
     std::unordered_map<std::string, std::unordered_map<std::uint64_t, std::string>>             mLineContentCache;
     std::unordered_map<std::string, std::unordered_map<std::size_t, HologramLineCallbackEntry>> mLineCallbacks;
-    std::unordered_map<std::string, std::unordered_map<std::uint64_t, uint64_t>> mLineCallbackUpdateCache;
-    std::vector<ll::event::ListenerPtr>                                          mListeners;
+    std::unordered_map<std::string, std::unordered_map<std::uint64_t, uint64_t>>                mLineCallbackUpdateCache;
+    std::unordered_map<std::string, std::unordered_map<std::uint64_t, PendingHologramPacket>>   mPendingPackets;
+    std::unordered_set<std::string>                                                              mInitializedPlayers;
+    std::vector<ll::event::ListenerPtr>                                                          mListeners;
 };
 
 } // namespace phantom::hologram
