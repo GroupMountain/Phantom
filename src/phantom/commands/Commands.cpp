@@ -23,7 +23,7 @@
 #include <vector>
 
 namespace phantom::commands {
-namespace {
+namespace detail {
 
 enum class PhantomAction : unsigned char {
     gui,
@@ -47,35 +47,35 @@ struct ActionParam {
 };
 
 struct NamedActionParam {
-    PhantomAction action;
+    PhantomAction action{};
     std::string   name;
 };
 
 struct TextActionParam {
-    PhantomAction action;
+    PhantomAction action{};
     std::string   name;
     std::string   text;
 };
 
 struct LineActionParam {
-    PhantomAction action;
+    PhantomAction action{};
     std::string   name;
-    int           index;
+    int           index{};
 };
 
 struct SetLineActionParam {
-    PhantomAction action;
+    PhantomAction action{};
     std::string   name;
-    int           index;
+    int           index{};
     std::string   text;
 };
 
 struct DynamicLineActionParam {
-    PhantomAction action;
+    PhantomAction action{};
     std::string   name;
-    int           index;
-    int           intervalMs;
-    int           parseVariables;
+    int           index{};
+    int           intervalMs{};
+    int           parseVariables{};
     std::string   text;
 };
 
@@ -322,7 +322,7 @@ void handleDynamicLine(
     output.success(ok ? tr(origin, "phantom.command.updated") : tr(origin, "phantom.command.not_found"));
 }
 
-} // namespace
+} // namespace detail
 
 void registerCommands() {
     auto& command = ll::command::CommandRegistrar::getServerInstance().getOrCreateCommand(
@@ -334,46 +334,46 @@ void registerCommands() {
     command.alias("hologram");
     command.alias("holo");
 
-    command.overload<EmptyParam>().execute([](CommandOrigin const& origin, CommandOutput& output, EmptyParam const&) {
-        openGui(origin, output);
-    });
-    command.overload<ActionParam>().required("action").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, ActionParam const& param) {
-            handleAction(origin, output, param.action);
+    command.overload<detail::EmptyParam>().execute([](CommandOrigin const& origin,
+                                                      CommandOutput&       output,
+                                                      detail::EmptyParam const&) { detail::openGui(origin, output); });
+    command.overload<detail::ActionParam>().required("action").execute(
+        [](CommandOrigin const& origin, CommandOutput& output, detail::ActionParam const& param) {
+            detail::handleAction(origin, output, param.action);
         }
     );
-    command.overload<NamedActionParam>().required("action").required("name").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, NamedActionParam const& param) {
-            handleNamed(origin, output, param.action, param.name);
+    command.overload<detail::NamedActionParam>().required("action").required("name").execute(
+        [](CommandOrigin const& origin, CommandOutput& output, detail::NamedActionParam const& param) {
+            detail::handleNamed(origin, output, param.action, param.name);
         }
     );
-    command.overload<TextActionParam>().required("action").required("name").required("text").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, TextActionParam const& param) {
-            handleText(origin, output, param.action, param.name, param.text);
+    command.overload<detail::TextActionParam>().required("action").required("name").required("text").execute(
+        [](CommandOrigin const& origin, CommandOutput& output, detail::TextActionParam const& param) {
+            detail::handleText(origin, output, param.action, param.name, param.text);
         }
     );
-    command.overload<LineActionParam>().required("action").required("name").required("index").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, LineActionParam const& param) {
-            handleLine(origin, output, param.action, param.name, param.index);
+    command.overload<detail::LineActionParam>().required("action").required("name").required("index").execute(
+        [](CommandOrigin const& origin, CommandOutput& output, detail::LineActionParam const& param) {
+            detail::handleLine(origin, output, param.action, param.name, param.index);
         }
     );
-    command.overload<SetLineActionParam>()
+    command.overload<detail::SetLineActionParam>()
         .required("action")
         .required("name")
         .required("index")
         .required("text")
-        .execute([](CommandOrigin const& origin, CommandOutput& output, SetLineActionParam const& param) {
-            handleSetLine(origin, output, param.name, param.index, param.text);
+        .execute([](CommandOrigin const& origin, CommandOutput& output, detail::SetLineActionParam const& param) {
+            detail::handleSetLine(origin, output, param.name, param.index, param.text);
         });
-    command.overload<DynamicLineActionParam>()
+    command.overload<detail::DynamicLineActionParam>()
         .required("action")
         .required("name")
         .required("index")
         .required("intervalMs")
         .required("parseVariables")
         .required("text")
-        .execute([](CommandOrigin const& origin, CommandOutput& output, DynamicLineActionParam const& param) {
-            handleDynamicLine(
+        .execute([](CommandOrigin const& origin, CommandOutput& output, detail::DynamicLineActionParam const& param) {
+            detail::handleDynamicLine(
                 origin,
                 output,
                 param.name,

@@ -468,7 +468,7 @@ bool HologramService::setLineDynamic(
             return false;
         }
         if (content.empty()) {
-            content.push_back("");
+            content.emplace_back();
         }
         hologram->lines[index].content          = std::move(content);
         hologram->lines[index].text             = hologram->lines[index].content.front();
@@ -604,8 +604,9 @@ bool HologramService::save() {
 }
 
 void HologramService::queuePendingShape(Player& player, net::DebugDrawerPacket::Shape shape) {
+    auto const       networkId = shape.networkId;
     std::scoped_lock lock{mMutex};
-    mPendingPackets[uuidOf(player)][shape.networkId] = PendingHologramPacket{.shape = std::move(shape)};
+    mPendingPackets[uuidOf(player)][networkId] = PendingHologramPacket{.shape = std::move(shape)};
 }
 
 void HologramService::sendHologram(Player& player, Hologram const& hologram, std::string const& text) {
@@ -644,7 +645,7 @@ void HologramService::flushPendingPackets(Player& player) {
     std::vector<net::DebugDrawerPacket::Shape> shapes;
     {
         std::scoped_lock lock{mMutex};
-        auto iter = mPendingPackets.find(uuidOf(player));
+        auto             iter = mPendingPackets.find(uuidOf(player));
         if (iter == mPendingPackets.end()) {
             return;
         }
@@ -663,8 +664,8 @@ void HologramService::flushPendingPackets(Player& player) {
 }
 
 void HologramService::markPlayerInitialized(NetworkIdentifier const& networkId) {
-    auto handler = ll::service::getServerNetworkHandler();
-    auto* player = handler ? handler->_getServerPlayer(networkId, SubClientId::PrimaryClient) : nullptr;
+    auto  handler = ll::service::getServerNetworkHandler();
+    auto* player  = handler ? handler->_getServerPlayer(networkId, SubClientId::PrimaryClient) : nullptr;
     if (player == nullptr) {
         return;
     }
@@ -677,7 +678,7 @@ void HologramService::markPlayerInitialized(NetworkIdentifier const& networkId) 
 }
 
 bool HologramService::isPlayerInitialized(Player const& player) const {
-    auto const playerKey = uuidOf(player);
+    auto const       playerKey = uuidOf(player);
     std::scoped_lock lock{mMutex};
     return mInitializedPlayers.contains(playerKey);
 }
@@ -724,7 +725,7 @@ void HologramService::refreshPlayer(Player& player, bool force) {
             continue;
         }
 
-        std::optional<std::string> resolvedText;
+        std::optional<std::string>                                 resolvedText;
         std::unordered_map<std::size_t, HologramLineCallbackEntry> callbacks;
         {
             std::scoped_lock lock{mMutex};
@@ -845,7 +846,7 @@ void HologramService::refreshHologram(Hologram const& hologram, bool force) {
             return true;
         }
 
-        std::optional<std::string> resolvedText;
+        std::optional<std::string>                                 resolvedText;
         std::unordered_map<std::size_t, HologramLineCallbackEntry> callbacks;
         {
             std::scoped_lock lock{mMutex};
