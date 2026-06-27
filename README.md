@@ -114,6 +114,10 @@ xmake build Phantom
 - LeviLamina
 - SculkCatalystMC/Protocol
 
+## 许可证
+
+本项目基于 GNU Lesser General Public License v3.0（LGPL-3.0）开源，完整协议文本见 [LICENSE](LICENSE)。
+
 ## 参考
 
 - DecentHolograms：Java 版成熟悬浮字的功能结构参考。
