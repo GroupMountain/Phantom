@@ -124,5 +124,4 @@ xmake build Phantom
 - BedrockServerClientInterface：基岩版悬浮显示思路参考。
 - GMLIB FloatingText：运行时悬浮字管理模型参考。
 - GMSidebar：动态内容池、轮播间隔和每玩家缓存刷新策略参考。
-- ItemPhys：本仓库内的数据包发包范式参考。
 - SculkCatalystMC/Protocol：协议 ID、基础类型和序列化范式参考；ID 328 在当前 BDS/LeviLamina 中按 `DebugDrawerPacket` 线格式写入。
