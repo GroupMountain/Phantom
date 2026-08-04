@@ -1,7 +1,7 @@
 #pragma once
 
 #include "phantom/hologram/HologramTypes.h"
-#include "phantom/net/DebugDrawerPacket.h"
+#include "phantom/net/PrimitiveShapesPacket.h"
 
 #include "ll/api/event/ListenerBase.h"
 
@@ -27,7 +27,7 @@ struct HologramLineCallbackEntry {
 };
 
 struct PendingHologramPacket {
-    net::DebugDrawerPacket::Shape shape;
+    net::PrimitiveShapesPacket::Shape shape;
 };
 
 class HologramService {
@@ -87,7 +87,7 @@ private:
 
     void sendHologram(Player& player, Hologram const& hologram, std::string const& text);
     void removeHologramFromClient(Player& player, Hologram const& hologram);
-    void queuePendingShape(Player& player, net::DebugDrawerPacket::Shape shape);
+    void queuePendingShape(Player& player, net::PrimitiveShapesPacket::Shape shape);
 
     mutable std::mutex mMutex;
     HologramStore      mStore{};

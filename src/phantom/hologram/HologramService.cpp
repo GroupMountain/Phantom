@@ -2,7 +2,7 @@
 
 #include "mod/Phantom.h"
 #include "phantom/i18n/I18n.h"
-#include "phantom/net/DebugDrawerPacket.h"
+#include "phantom/net/PrimitiveShapesPacket.h"
 #include "phantom/net/SculkPacket.h"
 
 #include "ll/api/Config.h"
@@ -58,17 +58,18 @@ std::string logText(std::string_view key, std::initializer_list<std::pair<std::s
     return hologram.lineSpacing > 0.0 ? hologram.lineSpacing : Phantom::getInstance().getConfig().lineSpacing;
 }
 
-[[nodiscard]] bool nearEnough(Player const& player, Hologram const& hologram) {
-    if (!hologram.enabled || dimOf(player) != hologram.dimension) {
+[[nodiscard]] bool shouldShow(Player const& player, Hologram const& hologram) {
+    if (!hologram.enabled || dimOf(player) != hologram.dimension)
         return false;
-    }
+    /*
     auto const distance = configuredViewDistance(hologram);
     auto const pp       = player.getPosition();
     auto const hp       = hologram.position;
     auto const dx       = static_cast<double>(pp.x - hp.x);
     auto const dy       = static_cast<double>(pp.y - hp.y);
     auto const dz       = static_cast<double>(pp.z - hp.z);
-    return dx * dx + dy * dy + dz * dz <= distance * distance;
+    return dx * dx + dy * dy + dz * dz <= distance * distance;*/
+    return true;
 }
 
 [[nodiscard]] sculk::protocol::Vec3 toProtocol(Vec3 const& pos) { return {pos.x, pos.y, pos.z}; }
@@ -603,31 +604,32 @@ bool HologramService::save() {
     return ll::config::saveConfig(snapshot, storePath());
 }
 
-void HologramService::queuePendingShape(Player& player, net::DebugDrawerPacket::Shape shape) {
+void HologramService::queuePendingShape(Player& player, net::PrimitiveShapesPacket::Shape shape) {
     auto const       networkId = shape.networkId;
     std::scoped_lock lock{mMutex};
     mPendingPackets[uuidOf(player)][networkId] = PendingHologramPacket{.shape = std::move(shape)};
 }
 
 void HologramService::sendHologram(Player& player, Hologram const& hologram, std::string const& text) {
-    net::DebugDrawerPacket::Shape shape{
-        .networkId   = runtimeIdFor(hologram.name, 0),
-        .location    = toProtocol(hologram.position),
-        .dimensionId = hologram.dimension,
-        .text        = text,
-        .remove      = false,
+    net::PrimitiveShapesPacket::Shape shape{
+        .networkId    = runtimeIdFor(hologram.name, 0),
+        .location     = toProtocol(hologram.position),
+        .dimensionId  = hologram.dimension,
+        .text         = text,
+        .viewDistance = hologram.viewDistance,
+        .remove       = false,
     };
     if (!isPlayerInitialized(player)) {
         queuePendingShape(player, std::move(shape));
         return;
     }
-    net::DebugDrawerPacket packet;
+    net::PrimitiveShapesPacket packet;
     packet.shapes.push_back(std::move(shape));
     net::sendSculkPacketTo(player, packet, logger());
 }
 
 void HologramService::removeHologramFromClient(Player& player, Hologram const& hologram) {
-    net::DebugDrawerPacket::Shape shape{
+    net::PrimitiveShapesPacket::Shape shape{
         .networkId   = runtimeIdFor(hologram.name, 0),
         .dimensionId = hologram.dimension,
         .remove      = true,
@@ -636,13 +638,13 @@ void HologramService::removeHologramFromClient(Player& player, Hologram const& h
         queuePendingShape(player, std::move(shape));
         return;
     }
-    net::DebugDrawerPacket packet;
+    net::PrimitiveShapesPacket packet;
     packet.shapes.push_back(std::move(shape));
     net::sendSculkPacketTo(player, packet, logger());
 }
 
 void HologramService::flushPendingPackets(Player& player) {
-    std::vector<net::DebugDrawerPacket::Shape> shapes;
+    std::vector<net::PrimitiveShapesPacket::Shape> shapes;
     {
         std::scoped_lock lock{mMutex};
         auto             iter = mPendingPackets.find(uuidOf(player));
@@ -658,7 +660,7 @@ void HologramService::flushPendingPackets(Player& player) {
     if (shapes.empty()) {
         return;
     }
-    net::DebugDrawerPacket packet;
+    net::PrimitiveShapesPacket packet;
     packet.shapes = std::move(shapes);
     net::sendSculkPacketTo(player, packet, logger());
 }
@@ -689,9 +691,7 @@ void HologramService::refreshPlayer(Player& player, bool force) {
 
     std::unordered_set<std::uint64_t> expected;
     for (auto const& hologram : snapshot) {
-        if (!nearEnough(player, hologram)) {
-            continue;
-        }
+        if (!shouldShow(player, hologram)) continue;
         expected.insert(runtimeIdFor(hologram.name, 0));
     }
 
@@ -824,7 +824,7 @@ void HologramService::refreshHologram(Hologram const& hologram, bool force) {
     auto const runtimeId = runtimeIdFor(hologram.name, 0);
     level->forEachPlayer([&](Player& player) {
         auto const playerKey = uuidOf(player);
-        auto const visible   = nearEnough(player, hologram);
+        auto const visible   = shouldShow(player, hologram);
 
         bool wasVisible = false;
         {
