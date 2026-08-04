@@ -90,6 +90,10 @@ bool Phantom::disable() {
     return true;
 }
 
+bool Phantom::unload() {
+    return true;
+}
+
 } // namespace phantom
 
 LL_REGISTER_MOD(phantom::Phantom, phantom::Phantom::getInstance());
