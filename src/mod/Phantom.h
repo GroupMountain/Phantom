@@ -28,7 +28,6 @@ public:
     bool load();
     bool enable();
     bool disable();
-    bool unload();
 
 private:
     bool loadConfig();

@@ -90,9 +90,6 @@ bool Phantom::disable() {
     return true;
 }
 
-bool Phantom::unload() {
-    return true;
-}
 
 } // namespace phantom
 
