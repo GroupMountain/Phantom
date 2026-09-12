@@ -53,19 +53,19 @@ private:
             std::optional<std::int64_t>                         attachedToId;
             std::optional<float>                                viewDistance;
 
+            stream.writeOptional(location, &sculk::protocol::Vec3::write);
             stream.writeOptional(
                 type,
                 [](sculk::protocol::BinaryStream& out, sculk::protocol::PrimitiveShapesType value) {
                     out.writeEnum(value, &sculk::protocol::BinaryStream::writeByte);
                 }
             );
-            stream.writeOptional(location, &sculk::protocol::Vec3::write);
+            stream.writeOptional(shape.dimensionId, &sculk::protocol::BinaryStream::writeVarInt);
             stream.writeOptional(scale, &sculk::protocol::BinaryStream::writeFloat);
             stream.writeOptional(rotation, &sculk::protocol::Vec3::write);
             stream.writeOptional(timeLeftTotalSec, &sculk::protocol::BinaryStream::writeFloat);
             stream.writeOptional(viewDistance, &sculk::protocol::BinaryStream::writeFloat);
             stream.writeOptional(color, &sculk::protocol::BinaryStream::writeSignedInt);
-            stream.writeOptional(shape.dimensionId, &sculk::protocol::BinaryStream::writeVarInt);
             stream.writeOptional(attachedToId, &sculk::protocol::BinaryStream::writeVarInt64);
             stream.writeUnsignedVarInt(0);
             return;
@@ -79,20 +79,20 @@ private:
         std::optional<std::int64_t>                         attachedToId;
         std::optional<std::int32_t>                         backgroundColor;
 
+        stream.writeOptional(shape.location, &sculk::protocol::Vec3::write);
         stream.writeOptional(type, [](sculk::protocol::BinaryStream& out, sculk::protocol::PrimitiveShapesType value) {
             out.writeEnum(value, &sculk::protocol::BinaryStream::writeByte);
         });
-        stream.writeOptional(shape.location, &sculk::protocol::Vec3::write);
+        stream.writeOptional(shape.dimensionId, &sculk::protocol::BinaryStream::writeVarInt);
         stream.writeOptional(scale, &sculk::protocol::BinaryStream::writeFloat);
         stream.writeOptional(rotation, &sculk::protocol::Vec3::write);
         stream.writeOptional(timeLeftTotalSec, &sculk::protocol::BinaryStream::writeFloat);
         stream.writeOptional(shape.viewDistance, &sculk::protocol::BinaryStream::writeFloat);
         stream.writeOptional(color, &sculk::protocol::BinaryStream::writeSignedInt);
-        stream.writeOptional(shape.dimensionId, &sculk::protocol::BinaryStream::writeVarInt);
         stream.writeOptional(attachedToId, &sculk::protocol::BinaryStream::writeUnsignedInt64);
         stream.writeUnsignedVarInt(2);
         stream.writeString(shape.text);
-        stream.writeBool(false);//UseRotation(std::optional<sculk::protocol::Vec3>                rotation)
+        stream.writeBool(false);//UseRotation(#88)
         stream.writeOptional(backgroundColor, &sculk::protocol::BinaryStream::writeSignedInt);
         stream.writeBool(true);//DepthTest
         stream.writeBool(true);//ShowBackface

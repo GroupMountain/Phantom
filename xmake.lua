@@ -1,10 +1,11 @@
 add_rules("mode.debug", "mode.release")
 
 add_repositories("levimc-repo https://github.com/LiteLDev/xmake-repo.git")
+add_repositories("gmlib-repo https://github.com/GroupMountain/xmake-repo.git")
 
 
 
-add_requires("levilamina 26.20.0", {configs = {target_type = "server"}})
+add_requires("levilamina-lib 26.32.2", {configs = {target_type = "server"}})
 
 package("protocol")
     set_description("SculkCatalystMC Minecraft Bedrock Protocol Library")
@@ -63,7 +64,7 @@ package("protocol")
     end)
 package_end()
 
-add_requires("protocol ca54586848403ebbcc4751edb48b178a2ce265d4", {
+add_requires("protocol e61289fb9fa27d8085074f1d5856772cca9bd04d", {
     configs = {
         enable_detail_errors = true,
         enable_codec = true,
@@ -81,14 +82,14 @@ if not has_config("vs_runtime") then
 end
 
 target("Phantom")
-    set_version("0.0.1")
+    set_version("26.30.0")
     add_rules("@levibuildscript/linkrule")
     add_rules("@levibuildscript/modpacker")
     add_cxflags("/EHa", "/utf-8", "/W4", "/w44265", "/w44289", "/w44296", "/w45263", "/w44738", "/w45204")
 
     set_toolchains("clang-cl")
     add_defines("NOMINMAX", "UNICODE")
-    add_packages("levilamina", "protocol")
+    add_packages("levilamina-lib", "protocol")
     set_exceptions("none")
     set_kind("shared")
     set_languages("c++23")
@@ -96,9 +97,5 @@ target("Phantom")
     add_headerfiles("src/**.h")
     add_files("src/**.cpp")
     add_includedirs("src")
-    after_build(function (target)
-        local dst = "D:\\testserver\\26\\.cache\\bdsdown\\temp\\plugins\\Phantom\\"
-        os.cp(target:targetfile(), dst)
-        cprint("${bright cyan}[Mod Copier] copied ${bright blue}" .. target:filename() .. "${bright cyan} to ${clear}" .. dst)
-    end)
+
 
