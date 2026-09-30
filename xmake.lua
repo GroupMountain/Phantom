@@ -5,7 +5,7 @@ add_repositories("gmlib-repo https://github.com/GroupMountain/xmake-repo.git")
 
 
 
-add_requires("levilamina-lib 26.32.2", {configs = {target_type = "server"}})
+add_requires("levilamina-lib 26.51.5", {configs = {target_type = "server"}})
 
 package("protocol")
     set_description("SculkCatalystMC Minecraft Bedrock Protocol Library")
@@ -82,7 +82,7 @@ if not has_config("vs_runtime") then
 end
 
 target("Phantom")
-    set_version("26.30.0")
+    set_version("26.50.0")
     add_rules("@levibuildscript/linkrule")
     add_rules("@levibuildscript/modpacker")
     add_cxflags("/EHa", "/utf-8", "/W4", "/w44265", "/w44289", "/w44296", "/w45263", "/w44738", "/w45204")
