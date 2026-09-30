@@ -1,7 +1,7 @@
 {
     "name": "${modName}",
     "entry": "${modFile}",
-    "version": "26.20.0",
+    "version": "26.51.0",
     "type": "native",
     "platform": "server"
 }

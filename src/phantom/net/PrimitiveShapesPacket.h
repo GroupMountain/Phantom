@@ -92,8 +92,9 @@ private:
         stream.writeOptional(attachedToId, &sculk::protocol::BinaryStream::writeUnsignedInt64);
         stream.writeUnsignedVarInt(2);
         stream.writeString(shape.text);
-        stream.writeBool(false);//UseRotation(std::optional<sculk::protocol::Vec3>                rotation)
+        stream.writeBool(false);//UseRotation(#88)
         stream.writeOptional(backgroundColor, &sculk::protocol::BinaryStream::writeSignedInt);
+        stream.writeFloat(0.0);
         stream.writeBool(true);//DepthTest
         stream.writeBool(true);//ShowBackface
         stream.writeBool(true);//ShowTextBackface
